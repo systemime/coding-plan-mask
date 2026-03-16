@@ -149,17 +149,17 @@ curl http://127.0.0.1:8787/v1/chat/completions \
     }'
 ```
 
-### 📊 Real-time Monitoring
+### 📊 Statistics & Connection Info
 
 ```bash
 # View statistics
 coding-plan-proxy stats
 
-# Real-time monitoring with ASCII charts
-coding-plan-proxy monitor
-
 # View connection info
 coding-plan-proxy show
+
+# JSON format output (for scripting)
+coding-plan-proxy show --json
 ```
 
 Output example:
@@ -408,17 +408,17 @@ curl http://127.0.0.1:8787/v1/chat/completions \
     }'
 ```
 
-### 📊 实时监控
+### 📊 统计与连接信息
 
 ```bash
 # 查看统计信息
 coding-plan-proxy stats
 
-# 实时监控 (带 ASCII 图表)
-coding-plan-proxy monitor
-
 # 查看连接信息
 coding-plan-proxy show
+
+# JSON 格式输出 (便于脚本使用)
+coding-plan-proxy show --json
 ```
 
 输出示例：

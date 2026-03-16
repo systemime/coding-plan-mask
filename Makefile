@@ -2,7 +2,7 @@
 
 # 变量
 APP_NAME := coding-plan-proxy
-VERSION := 2.0.0
+VERSION := 0.2.0
 BUILD_DIR := build
 BIN_DIR := $(BUILD_DIR)/bin
 CMD_DIR := cmd/coding-plan-proxy

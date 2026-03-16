@@ -266,20 +266,27 @@ func estimateInputTokens(reqBody map[string]interface{}) int {
 
 ### 4.2 配置改进
 
-**✅ 已完成 - 添加更多伪装工具选项**:
+**✅ 已完成 - 使用有来源依据的伪装工具选项**:
 
 ```go
 // config.go
+// User-Agent 来源说明:
+// - claudecode: GitHub issues + Medium 流量分析, 格式 claude-code/<version>
+// - openclaw: GitHub issue #30099, OpenClaw 默认发送 OpenClaw-Gateway
+// - kimicode: Kimi Code API 订阅认证要求 claude-code/0.1.0
 var PredefinedDisguiseTools = map[string]DisguiseToolConfig{
-    "claudecode": {UserAgent: "claude-code/2.0.64"},  // 新增 (默认)
-    "cursor":     {UserAgent: "cursor/0.45.0"},       // 新增
-    "cline":      {UserAgent: "cline/3.0.0"},         // 新增
-    "copilot":    {UserAgent: "GithubCopilot/1.0"},   // 新增
-    "opencode":   {UserAgent: "opencode/0.3.0 (linux)"},
+    "claudecode": {UserAgent: "claude-code/2.1.63"}, // 推荐, 兼容智谱/Kimi
+    "kimicode":   {UserAgent: "claude-code/0.1.0"},  // Kimi Code API 订阅认证格式
     "openclaw":   {UserAgent: "OpenClaw-Gateway/1.0"},
-    "custom":     {UserAgent: ""},
+    "custom":     {UserAgent: ""},                   // 使用自定义值
 }
 ```
+
+**参考来源**:
+- [Claude Code GitHub Issues](https://github.com/anthropics/claude-code/issues/34804)
+- [OpenClaw Issue #30099](https://github.com/openclaw/openclaw/issues/30099)
+- [Claude Code SSL Traffic Analysis](https://medium.com/@yunwei356/reverse-engineering-claude-codes-ssl-traffic-with-ebpf-1dde03bcc7ef)
+- [Linux.do 智谱 CC 月包讨论](https://linux.do/t/topic/934378)
 
 ---
 

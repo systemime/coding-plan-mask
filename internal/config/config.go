@@ -102,36 +102,27 @@ type DisguiseToolConfig struct {
 }
 
 // PredefinedDisguiseTools 预定义的伪装工具
+// User-Agent 来源说明:
+// - claudecode: GitHub issues + Medium 流量分析, 格式 claude-code/<version>
+// - openclaw: GitHub issue #30099, OpenClaw 默认发送 OpenClaw-Gateway
+// - kimicode: Kimi Code API 订阅认证要求 claude-code/0.1.0
+// 参考: https://github.com/openclaw/openclaw/issues/30099
+// 参考: https://medium.com/@yunwei356/reverse-engineering-claude-codes-ssl-traffic-with-ebpf-1dde03bcc7ef
 var PredefinedDisguiseTools = map[string]DisguiseToolConfig{
 	"claudecode": {
 		Name:      "Claude Code",
-		UserAgent: "claude-code/2.0.64",
-		ExtraInfo: "Anthropic 官方终端编程助手",
+		UserAgent: "claude-code/2.1.63",
+		ExtraInfo: "Anthropic 官方终端编程助手 (推荐)",
 	},
-	"cursor": {
-		Name:      "Cursor",
-		UserAgent: "cursor/0.45.0",
-		ExtraInfo: "AI 代码编辑器",
-	},
-	"cline": {
-		Name:      "Cline",
-		UserAgent: "cline/3.0.0",
-		ExtraInfo: "VS Code AI 编程助手",
-	},
-	"opencode": {
-		Name:      "OpenCode",
-		UserAgent: "opencode/0.3.0 (linux)",
-		ExtraInfo: "开源编程助手 (已归档)",
+	"kimicode": {
+		Name:      "Kimi Code 兼容",
+		UserAgent: "claude-code/0.1.0",
+		ExtraInfo: "Kimi Code API 订阅认证格式",
 	},
 	"openclaw": {
 		Name:      "OpenClaw",
 		UserAgent: "OpenClaw-Gateway/1.0",
-		ExtraInfo: "AI 编程工具",
-	},
-	"copilot": {
-		Name:      "GitHub Copilot",
-		UserAgent: "GithubCopilot/1.0",
-		ExtraInfo: "GitHub AI 编程助手",
+		ExtraInfo: "开源 AI 编程工具",
 	},
 	"custom": {
 		Name:      "自定义",

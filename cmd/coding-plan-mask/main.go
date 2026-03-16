@@ -19,7 +19,7 @@ import (
 )
 
 var (
-	version = "0.4.0"
+	version = "0.4.1"
 	commit  = "unknown"
 	date    = "unknown"
 )
@@ -258,13 +258,15 @@ func printHelp() {
   -version               显示版本信息
 
 伪装工具配置 (在 config.toml 中设置):
-  disguise_tool = "claudecode"  伪装为 Claude Code (推荐)
-  disguise_tool = "cursor"      伪装为 Cursor IDE
-  disguise_tool = "cline"       伪装为 Cline
-  disguise_tool = "opencode"    伪装为 OpenCode
+  disguise_tool = "claudecode"  伪装为 Claude Code (推荐, 兼容智谱/Kimi)
+  disguise_tool = "kimicode"    Kimi Code API 订阅认证格式
   disguise_tool = "openclaw"    伪装为 OpenClaw
-  disguise_tool = "copilot"     伪装为 GitHub Copilot
   disguise_tool = "custom"      使用自定义 User-Agent
+
+User-Agent 来源说明:
+  claudecode: claude-code/<version> - 来自 Claude Code 官方
+  kimicode:   claude-code/0.1.0 - Kimi Code API 订阅认证要求
+  openclaw:   OpenClaw-Gateway/1.0 - OpenClaw 默认 UA
 
 示例:
   # 启动服务

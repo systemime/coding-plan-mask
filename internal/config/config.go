@@ -145,18 +145,30 @@ func DefaultConfig() *Config {
 	}
 }
 
-// DefaultConfigPath 默认配置文件路径
-const DefaultConfigPath = "/opt/project/coding-plan-mask/config/config.toml"
+// getExecutableDir 获取可执行文件所在目录
+func getExecutableDir() string {
+	execPath, err := os.Executable()
+	if err != nil {
+		// 回退到当前工作目录
+		wd, _ := os.Getwd()
+		return wd
+	}
+	return filepath.Dir(execPath)
+}
+
+// getDefaultConfigPath 获取默认配置文件路径（在可执行文件所在目录）
+func getDefaultConfigPath() string {
+	return filepath.Join(getExecutableDir(), "config.toml")
+}
 
 // LoadConfig 从文件加载配置
 func LoadConfig(path string) (*Config, error) {
 	cfg := DefaultConfig()
-	cfg.configPath = path
 
 	if path == "" {
-		path = DefaultConfigPath
-		cfg.configPath = path
+		path = getDefaultConfigPath()
 	}
+	cfg.configPath = path
 
 	// 记录配置路径
 	absPath, _ := filepath.Abs(path)

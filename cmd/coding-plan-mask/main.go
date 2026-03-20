@@ -19,10 +19,21 @@ import (
 )
 
 var (
-	version = "0.5.1"
+	version = "0.5.2"
 	commit  = "unknown"
 	date    = "unknown"
 )
+
+// getExecutableDir 获取可执行文件所在目录
+func getExecutableDir() string {
+	execPath, err := os.Executable()
+	if err != nil {
+		// 回退到当前工作目录
+		wd, _ := os.Getwd()
+		return wd
+	}
+	return filepath.Dir(execPath)
+}
 
 func main() {
 	// 检查子命令
@@ -91,8 +102,9 @@ func main() {
 	logger := initLogger(cfg.Debug)
 	defer logger.Sync()
 
-	// 初始化存储
-	dataDir := filepath.Join(filepath.Dir(cfg.GetConfigPath()), "data")
+	// 初始化存储 - 数据库在可执行文件所在目录的 data 子目录
+	execDir := getExecutableDir()
+	dataDir := filepath.Join(execDir, "data")
 	store, err := storage.New(dataDir)
 	if err != nil {
 		logger.Fatal("初始化存储失败", zap.Error(err))
@@ -123,21 +135,14 @@ func showStats(args []string) {
 	configPath := fs.String("config", "", "配置文件路径")
 	_ = fs.Parse(args)
 
-	// 确定数据目录
+	// 确定数据目录 - 默认在可执行文件所在目录
 	var dataDir string
 	if *configPath != "" {
 		// 从配置文件路径推导数据目录
 		dataDir = filepath.Join(filepath.Dir(*configPath), "data")
 	} else {
-		// 尝试从 systemd 服务获取配置路径
-		serviceConfig := "/opt/project/coding-plan-mask/config/config.toml"
-		if _, err := os.Stat(serviceConfig); err == nil {
-			dataDir = filepath.Join(filepath.Dir(serviceConfig), "data")
-		} else {
-			// 默认路径
-			homeDir, _ := os.UserHomeDir()
-			dataDir = filepath.Join(homeDir, ".config", "coding-plan-mask", "data")
-		}
+		// 使用可执行文件所在目录
+		dataDir = filepath.Join(getExecutableDir(), "data")
 	}
 	dbPath := filepath.Join(dataDir, "proxy.db")
 

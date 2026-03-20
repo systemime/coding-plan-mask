@@ -2,7 +2,7 @@
 
 # Variables
 APP_NAME := mask-ctl
-VERSION := 0.5.1
+VERSION := 0.5.2
 BUILD_DIR := build
 BIN_DIR := $(BUILD_DIR)/bin
 CMD_DIR := cmd/coding-plan-mask

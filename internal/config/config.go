@@ -54,6 +54,7 @@ type EndpointConfig struct {
 	CustomUserAgent     string `toml:"custom_user_agent"`
 	ClaudeCodeUserAgent string `toml:"claude_code_user_agent"`
 	OpenClawUserAgent   string `toml:"openclaw_user_agent"`
+	OpenCodeUserAgent   string `toml:"opencode_user_agent"`
 	// 伪装工具类型: claudecode, kimicode, openclaw, custom
 	// 兼容旧值: opencode
 	DisguiseTool string `toml:"disguise_tool"`
@@ -84,6 +85,7 @@ type Config struct {
 	CustomUserAgent     string
 	ClaudeCodeUserAgent string
 	OpenClawUserAgent   string
+	OpenCodeUserAgent   string
 	DisguiseTool        string // 伪装工具: claudecode, kimicode, openclaw, custom
 	Debug               bool
 	RateLimitRequests   int
@@ -109,6 +111,7 @@ type DisguiseToolConfig struct {
 const (
 	DefaultClaudeCodeUserAgent = "claude-cli/2.1.76 (external, cli)"
 	DefaultOpenClawUserAgent   = "OpenClaw-Gateway/1.0"
+	DefaultOpenCodeUserAgent   = "opencode/1.2.27 ai-sdk/provider-utils/3.0.20 runtime/bun/1.3.10"
 	ClaudeCodeAppHeaderValue   = "cli"
 )
 
@@ -116,6 +119,7 @@ const (
 // User-Agent 来源说明:
 // - claudecode: 当前 Claude Code CLI 请求格式，默认值可通过配置覆盖
 // - openclaw: OpenClaw 部分请求路径会发送 OpenClaw-Gateway/1.0，本项目保留该兼容默认值并允许覆盖
+// - opencode: 基于本地实际抓包报告的 OpenCode 1.2.27 请求格式，保留 legacy disguise_tool 标识
 // - kimicode: Kimi Code API 订阅认证要求 claude-code/0.1.0
 // 参考: 本地 Claude Code 请求抓包与已安装 CLI 代码检查
 // 参考: https://github.com/openclaw/openclaw/issues/30099
@@ -137,8 +141,8 @@ var PredefinedDisguiseTools = map[string]DisguiseToolConfig{
 	},
 	"opencode": {
 		Name:      "OpenCode (Legacy)",
-		UserAgent: "opencode/0.3.0 (linux)",
-		ExtraInfo: "旧版兼容选项",
+		UserAgent: DefaultOpenCodeUserAgent,
+		ExtraInfo: "Legacy disguise_tool 标识，默认 UA 已按本地抓包报告更新",
 	},
 	"custom": {
 		Name:      "自定义",
@@ -277,6 +281,7 @@ func LoadConfig(path string) (*Config, error) {
 	cfg.CustomUserAgent = cfgFile.Endpoint.CustomUserAgent
 	cfg.ClaudeCodeUserAgent = strings.TrimSpace(cfgFile.Endpoint.ClaudeCodeUserAgent)
 	cfg.OpenClawUserAgent = strings.TrimSpace(cfgFile.Endpoint.OpenClawUserAgent)
+	cfg.OpenCodeUserAgent = strings.TrimSpace(cfgFile.Endpoint.OpenCodeUserAgent)
 	cfg.DisguiseTool = normalizeDisguiseTool(cfgFile.Endpoint.DisguiseTool)
 
 	// 自定义 API 配置
@@ -326,6 +331,9 @@ func (c *Config) loadFromEnv() {
 	if v := os.Getenv("OPENCLAW_USER_AGENT"); v != "" {
 		c.OpenClawUserAgent = strings.TrimSpace(v)
 	}
+	if v := os.Getenv("OPENCODE_USER_AGENT"); v != "" {
+		c.OpenCodeUserAgent = strings.TrimSpace(v)
+	}
 }
 
 // Set 设置配置项
@@ -358,6 +366,8 @@ func (c *Config) Set(key string, value string) error {
 		c.ClaudeCodeUserAgent = strings.TrimSpace(value)
 	case "openclaw_user_agent":
 		c.OpenClawUserAgent = strings.TrimSpace(value)
+	case "opencode_user_agent":
+		c.OpenCodeUserAgent = strings.TrimSpace(value)
 	case "disguise_tool":
 		c.DisguiseTool = normalizeDisguiseTool(value)
 	case "api_base_url", "base_url":
@@ -424,6 +434,9 @@ func (c *Config) GetEffectiveUserAgent() string {
 	if normalizeDisguiseTool(c.DisguiseTool) == "openclaw" && c.OpenClawUserAgent != "" {
 		return c.OpenClawUserAgent
 	}
+	if normalizeDisguiseTool(c.DisguiseTool) == "opencode" && c.OpenCodeUserAgent != "" {
+		return c.OpenCodeUserAgent
+	}
 
 	// 根据伪装工具选择
 	if tool, ok := PredefinedDisguiseTools[normalizeDisguiseTool(c.DisguiseTool)]; ok && tool.UserAgent != "" {
@@ -474,6 +487,7 @@ func (c *Config) GetSafe() map[string]interface{} {
 		"custom_user_agent":      c.CustomUserAgent,
 		"claude_code_user_agent": c.ClaudeCodeUserAgent,
 		"openclaw_user_agent":    c.OpenClawUserAgent,
+		"opencode_user_agent":    c.OpenCodeUserAgent,
 		"debug":                  c.Debug,
 		"rate_limit_requests":    c.RateLimitRequests,
 		"timeout":                c.Timeout,
@@ -562,6 +576,9 @@ claude_code_user_agent = "claude-cli/2.1.76 (external, cli)"
 # OpenClaw 模式的兼容默认 User-Agent
 # 该值用于兼容部分 OpenClaw 请求路径，可按需覆盖
 openclaw_user_agent = "OpenClaw-Gateway/1.0"
+# OpenCode 模式的默认 User-Agent
+# 默认值基于本地抓包报告中的 OpenCode 1.2.27 请求格式
+opencode_user_agent = "opencode/1.2.27 ai-sdk/provider-utils/3.0.20 runtime/bun/1.3.10"
 # 自定义 User-Agent (留空使用默认，仅当 disguise_tool = "custom" 时生效)
 custom_user_agent = ""
 
@@ -590,7 +607,7 @@ var Providers = map[string]ProviderConfig{
 		GeneralBaseURL: "https://open.bigmodel.cn/api/paas/v4",
 		AuthHeader:     "Authorization",
 		AuthPrefix:     "Bearer ",
-		UserAgent:      "opencode/0.3.0 (linux)",
+		UserAgent:      DefaultOpenCodeUserAgent,
 		ExtraHeaders:   map[string]string{},
 		Models:         []string{"glm-4-flash", "glm-4-plus", "glm-4-air", "glm-4-long", "glm-4"},
 	},
@@ -600,7 +617,7 @@ var Providers = map[string]ProviderConfig{
 		GeneralBaseURL: "https://api.z.ai/api/paas/v4",
 		AuthHeader:     "Authorization",
 		AuthPrefix:     "Bearer ",
-		UserAgent:      "opencode/0.3.0 (linux)",
+		UserAgent:      DefaultOpenCodeUserAgent,
 		ExtraHeaders:   map[string]string{},
 		Models:         []string{"glm-4-flash", "glm-4-plus", "glm-4-air", "glm-4-long", "glm-4", "glm-4.7", "glm-5"},
 	},
@@ -610,7 +627,7 @@ var Providers = map[string]ProviderConfig{
 		GeneralBaseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
 		AuthHeader:     "Authorization",
 		AuthPrefix:     "Bearer ",
-		UserAgent:      "opencode/0.3.0 (linux)",
+		UserAgent:      DefaultOpenCodeUserAgent,
 		ExtraHeaders:   map[string]string{"X-DashScope-SSE": "enable"},
 		Models:         []string{"qwen-turbo", "qwen-plus", "qwen-max", "qwen2.5-coder-32b-instruct"},
 	},
@@ -620,7 +637,7 @@ var Providers = map[string]ProviderConfig{
 		GeneralBaseURL: "https://api.minimax.chat/v1",
 		AuthHeader:     "Authorization",
 		AuthPrefix:     "Bearer ",
-		UserAgent:      "opencode/0.3.0 (linux)",
+		UserAgent:      DefaultOpenCodeUserAgent,
 		ExtraHeaders:   map[string]string{},
 		Models:         []string{"abab6.5s-chat", "abab6.5g-chat", "abab6.5-chat"},
 	},
@@ -630,7 +647,7 @@ var Providers = map[string]ProviderConfig{
 		GeneralBaseURL: "https://api.deepseek.com/v1",
 		AuthHeader:     "Authorization",
 		AuthPrefix:     "Bearer ",
-		UserAgent:      "opencode/0.3.0 (linux)",
+		UserAgent:      DefaultOpenCodeUserAgent,
 		ExtraHeaders:   map[string]string{},
 		Models:         []string{"deepseek-chat", "deepseek-coder"},
 	},
@@ -640,7 +657,7 @@ var Providers = map[string]ProviderConfig{
 		GeneralBaseURL: "https://api.moonshot.cn/v1",
 		AuthHeader:     "Authorization",
 		AuthPrefix:     "Bearer ",
-		UserAgent:      "opencode/0.3.0 (linux)",
+		UserAgent:      DefaultOpenCodeUserAgent,
 		ExtraHeaders:   map[string]string{},
 		Models:         []string{"moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"},
 	},
@@ -650,7 +667,7 @@ var Providers = map[string]ProviderConfig{
 		GeneralBaseURL: "",
 		AuthHeader:     "Authorization",
 		AuthPrefix:     "Bearer ",
-		UserAgent:      "opencode/0.3.0 (linux)",
+		UserAgent:      DefaultOpenCodeUserAgent,
 		ExtraHeaders:   map[string]string{},
 		Models:         []string{},
 	},

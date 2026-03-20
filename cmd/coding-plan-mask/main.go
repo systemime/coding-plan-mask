@@ -19,7 +19,7 @@ import (
 )
 
 var (
-	version = "0.7.1"
+	version = "0.7.2"
 	commit  = "unknown"
 	date    = "unknown"
 )
@@ -266,6 +266,8 @@ func printHelp() {
   disguise_tool = "claudecode"  伪装为 Claude Code 风格请求
   claude_code_user_agent = "claude-cli/2.1.76 (external, cli)"
   disguise_tool = "kimicode"    Kimi Code API 订阅认证格式
+  disguise_tool = "opencode"    兼容旧版 OpenCode 标识
+  opencode_user_agent = "opencode/1.2.27 ai-sdk/provider-utils/3.0.20 runtime/bun/1.3.10"
   disguise_tool = "openclaw"    伪装为 OpenClaw
   openclaw_user_agent = "OpenClaw-Gateway/1.0"
   disguise_tool = "custom"      使用自定义 User-Agent
@@ -273,6 +275,7 @@ func printHelp() {
 User-Agent 来源说明:
   claudecode: claude-cli/<version> (external, cli) - 可通过 claude_code_user_agent 覆盖
   kimicode:   claude-code/0.1.0 - Kimi Code API 订阅认证要求
+  opencode:   opencode/<version> ai-sdk/... runtime/bun/... - 可通过 opencode_user_agent 覆盖
   openclaw:   OpenClaw-Gateway/1.0 - OpenClaw 兼容默认值，可通过 openclaw_user_agent 覆盖
 
 示例:

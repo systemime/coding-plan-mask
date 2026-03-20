@@ -14,7 +14,7 @@
 
 **关键发现**：
 - Claude Code CLI 的 User-Agent 格式存在模式差异，当前更接近 `claude-cli/<version> (external, cli)`
-- OpenCode 使用：`opencode/0.3.0 (linux)` (项目已归档，更名为 Crush)
+- OpenCode 抓包值：`opencode/1.2.27 ai-sdk/provider-utils/3.0.20 runtime/bun/1.3.10`
 - OpenClaw 在部分请求路径中使用：`OpenClaw-Gateway/1.0`
 
 ### 1.2 当前项目实现分析
@@ -65,22 +65,22 @@ x-app: cli
 ```
 
 #### OpenCode 实现特征
-根据 [GitHub 源码](https://github.com/opencode-ai/opencode)：
-- 使用 Go 的 `net/http` 标准库
-- User-Agent: `opencode/0.3.0 (linux)`
+根据本地抓包报告：
+- 运行时为 Bun
+- User-Agent: `opencode/1.2.27 ai-sdk/provider-utils/3.0.20 runtime/bun/1.3.10`
 - 无额外特殊认证头
 
 #### 当前项目实现
-- User-Agent: 可配置（opencode/openclaw/custom）
-- 额外添加 `X-Client-Type: coding-tool`
+- User-Agent: 可配置（claudecode/kimicode/opencode/openclaw/custom）
+- `opencode` 模式当前无额外专属头
 
 **差异点**:
 | 项目 | User-Agent | 额外 Header |
 |------|------------|-------------|
 | Claude Code | `claude-cli/2.1.76 (external, cli)` | `x-app: cli` |
-| OpenCode | `opencode/0.3.0 (linux)` | 无 |
+| OpenCode | `opencode/1.2.27 ai-sdk/provider-utils/3.0.20 runtime/bun/1.3.10` | 无 |
 | OpenClaw | `OpenClaw-Gateway/1.0`（部分路径） | 无 |
-| **当前项目** | `claude-cli/2.1.76 (external, cli)` / `OpenClaw-Gateway/1.0` | `x-app: cli`（仅 `claudecode` 模式） |
+| **当前项目** | `claude-cli/2.1.76 (external, cli)` / `opencode/1.2.27 ai-sdk/provider-utils/3.0.20 runtime/bun/1.3.10` / `OpenClaw-Gateway/1.0` | `x-app: cli`（仅 `claudecode` 模式） |
 
 **风险点**: Claude Code 的真实请求特征可能继续演进，默认 UA 需要随版本校准。
 
@@ -224,7 +224,7 @@ curl http://127.0.0.1:8787/v1/chat/completions ...
 ```
 
 **关注点**:
-1. User-Agent 值是否正确设置为 `opencode/0.3.0 (linux)`
+1. User-Agent 值是否正确设置为抓包报告中的 OpenCode UA
 2. 是否存在其他可能暴露身份的 Header
 3. 请求体格式是否与官方工具一致
 

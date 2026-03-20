@@ -6,7 +6,7 @@
 
 [![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://golang.org/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.7.1-green.svg)](https://github.com/systemime/coding-plan-mask)
+[![Version](https://img.shields.io/badge/version-0.7.2-green.svg)](https://github.com/systemime/coding-plan-mask)
 
 *Use your Coding Plan subscription with ANY OpenAI-compatible coding tool*
 
@@ -67,22 +67,22 @@ Download the binary for your platform from [GitHub Releases](https://github.com/
 
 ```bash
 # Linux amd64
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.1/mask-ctl-linux-amd64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.2/mask-ctl-linux-amd64
 chmod +x mask-ctl-linux-amd64
 sudo mv mask-ctl-linux-amd64 /usr/local/bin/mask-ctl
 
 # Linux arm64
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.1/mask-ctl-linux-arm64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.2/mask-ctl-linux-arm64
 chmod +x mask-ctl-linux-arm64
 sudo mv mask-ctl-linux-arm64 /usr/local/bin/mask-ctl
 
 # macOS (Darwin amd64)
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.1/mask-ctl-darwin-amd64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.2/mask-ctl-darwin-amd64
 chmod +x mask-ctl-darwin-amd64
 sudo mv mask-ctl-darwin-amd64 /usr/local/bin/mask-ctl
 
 # macOS (Darwin arm64)
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.1/mask-ctl-darwin-arm64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.2/mask-ctl-darwin-arm64
 chmod +x mask-ctl-darwin-arm64
 sudo mv mask-ctl-darwin-arm64 /usr/local/bin/mask-ctl
 
@@ -190,6 +190,8 @@ In non-debug mode, startup keeps the banner output and proxy activity is shown i
 disguise_tool = "claudecode"  # Claude Code-style CLI traffic
 # claude_code_user_agent = "claude-cli/2.1.76 (external, cli)"
 # disguise_tool = "kimicode"    # Kimi Code API subscription auth format
+# disguise_tool = "opencode"    # Legacy OpenCode disguise id
+# opencode_user_agent = "opencode/1.2.27 ai-sdk/provider-utils/3.0.20 runtime/bun/1.3.10"
 # disguise_tool = "openclaw"    # OpenClaw
 # openclaw_user_agent = "OpenClaw-Gateway/1.0"
 # disguise_tool = "custom"     # Use custom User-Agent
@@ -200,10 +202,12 @@ disguise_tool = "claudecode"  # Claude Code-style CLI traffic
 |------|------------|------------|-------------|
 | **Claude Code** | `claudecode` | `claude-cli/2.1.76 (external, cli)` | Current default Claude CLI-style UA, configurable via `claude_code_user_agent` |
 | **Kimi Code** | `kimicode` | `claude-code/0.1.0` | Kimi Code API subscription auth format |
+| **OpenCode** | `opencode` | `opencode/1.2.27 ai-sdk/provider-utils/3.0.20 runtime/bun/1.3.10` | Legacy disguise id with default UA updated from local capture report |
 | **OpenClaw** | `openclaw` | `OpenClaw-Gateway/1.0` | Compatibility default, configurable via `openclaw_user_agent` |
 | **Custom** | `custom` | (custom) | Use `custom_user_agent` config |
 
 > **Note**: `claudecode` mode also injects `x-app: cli` if the incoming request does not already provide it.
+> **Note**: `opencode` mode keeps the legacy disguise id but now defaults to the locally captured OpenCode 1.2.27 UA. Override it with `opencode_user_agent` if needed.
 > **Note**: `openclaw` mode keeps `OpenClaw-Gateway/1.0` as a compatibility default, but this does not imply every current OpenClaw request path uses the same UA.
 
 ### 📡 API Endpoints
@@ -250,6 +254,7 @@ You can also configure via environment variables:
 | `API_CODING_URL` | Custom coding endpoint URL |
 | `DISGUISE_TOOL` | Override disguise tool |
 | `CLAUDE_CODE_USER_AGENT` | Override the default UA used by `claudecode` mode |
+| `OPENCODE_USER_AGENT` | Override the default UA used by `opencode` mode |
 | `OPENCLAW_USER_AGENT` | Override the compatibility UA used by `openclaw` mode |
 | `CUSTOM_USER_AGENT` | Override User-Agent directly |
 
@@ -313,22 +318,22 @@ This project is provided for **educational and research purposes only**.
 
 ```bash
 # Linux amd64
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.1/mask-ctl-linux-amd64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.2/mask-ctl-linux-amd64
 chmod +x mask-ctl-linux-amd64
 sudo mv mask-ctl-linux-amd64 /usr/local/bin/mask-ctl
 
 # Linux arm64
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.1/mask-ctl-linux-arm64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.2/mask-ctl-linux-arm64
 chmod +x mask-ctl-linux-arm64
 sudo mv mask-ctl-linux-arm64 /usr/local/bin/mask-ctl
 
 # macOS amd64
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.1/mask-ctl-darwin-amd64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.2/mask-ctl-darwin-amd64
 chmod +x mask-ctl-darwin-amd64
 sudo mv mask-ctl-darwin-amd64 /usr/local/bin/mask-ctl
 
 # macOS arm64
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.1/mask-ctl-darwin-arm64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.2/mask-ctl-darwin-arm64
 chmod +x mask-ctl-darwin-arm64
 sudo mv mask-ctl-darwin-arm64 /usr/local/bin/mask-ctl
 ```
@@ -428,10 +433,12 @@ sudo systemctl start coding-plan-mask
 |------|--------|------------|------|
 | **Claude Code** | `claudecode` | `claude-cli/2.1.76 (external, cli)` | 当前默认 Claude CLI 风格 UA，可通过 `claude_code_user_agent` 覆盖 |
 | **Kimi Code** | `kimicode` | `claude-code/0.1.0` | Kimi Code API 订阅认证格式 |
+| **OpenCode** | `opencode` | `opencode/1.2.27 ai-sdk/provider-utils/3.0.20 runtime/bun/1.3.10` | 保留旧 disguise id，默认 UA 已按本地抓包报告更新 |
 | **OpenClaw** | `openclaw` | `OpenClaw-Gateway/1.0` | 兼容默认值，可通过 `openclaw_user_agent` 覆盖 |
 | **自定义** | `custom` | (自定义) | 使用 `custom_user_agent` 配置 |
 
 > **说明**：`claudecode` 模式在传入请求未提供时还会补充 `x-app: cli`。
+> **说明**：`opencode` 模式保留旧标识，但默认 UA 已更新为本地抓包得到的 OpenCode 1.2.27 请求格式，可通过 `opencode_user_agent` 覆盖。
 > **说明**：`openclaw` 模式保留 `OpenClaw-Gateway/1.0` 作为兼容默认值，但这不代表当前 OpenClaw 所有请求路径都统一使用该 UA。
 
 ### 📡 API 端点
@@ -476,6 +483,7 @@ curl http://127.0.0.1:8787/stats
 | `API_CODING_URL` | 自定义 Coding API URL |
 | `DISGUISE_TOOL` | 覆盖伪装工具 |
 | `CLAUDE_CODE_USER_AGENT` | 覆盖 `claudecode` 模式默认 User-Agent |
+| `OPENCODE_USER_AGENT` | 覆盖 `opencode` 模式默认 User-Agent |
 | `OPENCLAW_USER_AGENT` | 覆盖 `openclaw` 模式兼容默认 User-Agent |
 | `CUSTOM_USER_AGENT` | 直接覆盖 User-Agent |
 

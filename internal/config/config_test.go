@@ -6,11 +6,11 @@ import (
 	"testing"
 )
 
-func TestGetEffectiveUserAgentSupportsLegacyOpencode(t *testing.T) {
+func TestGetEffectiveUserAgentSupportsLegacyOpencodeToolID(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.DisguiseTool = "opencode"
 
-	if got := cfg.GetEffectiveUserAgent(); got != "opencode/0.3.0 (linux)" {
+	if got := cfg.GetEffectiveUserAgent(); got != DefaultOpenCodeUserAgent {
 		t.Fatalf("expected legacy opencode user agent, got %q", got)
 	}
 }
@@ -51,6 +51,16 @@ func TestGetEffectiveUserAgentUsesOpenClawOverride(t *testing.T) {
 
 	if got := cfg.GetEffectiveUserAgent(); got != cfg.OpenClawUserAgent {
 		t.Fatalf("expected OpenClaw override user agent, got %q", got)
+	}
+}
+
+func TestGetEffectiveUserAgentUsesOpenCodeOverride(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.DisguiseTool = "opencode"
+	cfg.OpenCodeUserAgent = "opencode/9.9.9 ai-sdk/provider-utils/9.9.9 runtime/bun/9.9.9"
+
+	if got := cfg.GetEffectiveUserAgent(); got != cfg.OpenCodeUserAgent {
+		t.Fatalf("expected OpenCode override user agent, got %q", got)
 	}
 }
 

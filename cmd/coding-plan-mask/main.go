@@ -123,7 +123,7 @@ func main() {
 	}
 
 	// 创建并启动服务器
-	srv := server.New(cfg, logger, store)
+	srv := server.New(cfg, logger, store, version)
 	if err := srv.Start(); err != nil {
 		logger.Fatal("服务器启动失败", zap.Error(err))
 	}

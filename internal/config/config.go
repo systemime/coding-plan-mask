@@ -52,7 +52,8 @@ type AuthConfig struct {
 type EndpointConfig struct {
 	UseCodingEndpoint bool   `toml:"use_coding_endpoint"`
 	CustomUserAgent   string `toml:"custom_user_agent"`
-	// 伪装工具类型: opencode, openclaw, custom
+	// 伪装工具类型: claudecode, kimicode, openclaw, custom
+	// 兼容旧值: opencode
 	DisguiseTool string `toml:"disguise_tool"`
 }
 
@@ -79,15 +80,15 @@ type Config struct {
 	ListenPort         int
 	UseCodingEndpoint  bool
 	CustomUserAgent    string
-	DisguiseTool       string // 伪装工具: opencode, openclaw, custom
+	DisguiseTool       string // 伪装工具: claudecode, kimicode, openclaw, custom
 	Debug              bool
 	RateLimitRequests  int
 	Timeout            int
 	MaxRequestBodySize int64
 
 	// 自定义 API 配置
-	CustomBaseURL   string
-	CustomCodingURL string
+	CustomBaseURL    string
+	CustomCodingURL  string
 	CustomAuthHeader string
 	CustomAuthPrefix string
 
@@ -96,9 +97,9 @@ type Config struct {
 
 // DisguiseToolConfig 伪装工具配置
 type DisguiseToolConfig struct {
-	Name       string
-	UserAgent  string
-	ExtraInfo  string
+	Name      string
+	UserAgent string
+	ExtraInfo string
 }
 
 // PredefinedDisguiseTools 预定义的伪装工具
@@ -124,11 +125,24 @@ var PredefinedDisguiseTools = map[string]DisguiseToolConfig{
 		UserAgent: "OpenClaw-Gateway/1.0",
 		ExtraInfo: "开源 AI 编程工具",
 	},
+	"opencode": {
+		Name:      "OpenCode (Legacy)",
+		UserAgent: "opencode/0.3.0 (linux)",
+		ExtraInfo: "旧版兼容选项",
+	},
 	"custom": {
 		Name:      "自定义",
 		UserAgent: "",
 		ExtraInfo: "使用 custom_user_agent 配置",
 	},
+}
+
+func normalizeDisguiseTool(tool string) string {
+	tool = strings.ToLower(strings.TrimSpace(tool))
+	if tool == "" {
+		return "claudecode"
+	}
+	return tool
 }
 
 // DefaultConfig 返回默认配置
@@ -230,10 +244,7 @@ func LoadConfig(path string) (*Config, error) {
 
 	cfg.UseCodingEndpoint = cfgFile.Endpoint.UseCodingEndpoint
 	cfg.CustomUserAgent = cfgFile.Endpoint.CustomUserAgent
-	cfg.DisguiseTool = cfgFile.Endpoint.DisguiseTool
-	if cfg.DisguiseTool == "" {
-		cfg.DisguiseTool = "claudecode" // 默认使用 claudecode
-	}
+	cfg.DisguiseTool = normalizeDisguiseTool(cfgFile.Endpoint.DisguiseTool)
 
 	// 自定义 API 配置
 	cfg.CustomBaseURL = cfgFile.API.BaseURL
@@ -270,6 +281,12 @@ func (c *Config) loadFromEnv() {
 	if v := os.Getenv("API_CODING_URL"); v != "" {
 		c.CustomCodingURL = v
 	}
+	if v := os.Getenv("DISGUISE_TOOL"); v != "" {
+		c.DisguiseTool = normalizeDisguiseTool(v)
+	}
+	if v := os.Getenv("CUSTOM_USER_AGENT"); v != "" {
+		c.CustomUserAgent = v
+	}
 }
 
 // Set 设置配置项
@@ -299,7 +316,7 @@ func (c *Config) Set(key string, value string) error {
 	case "custom_user_agent":
 		c.CustomUserAgent = value
 	case "disguise_tool":
-		c.DisguiseTool = value
+		c.DisguiseTool = normalizeDisguiseTool(value)
 	case "api_base_url", "base_url":
 		c.CustomBaseURL = value
 	case "api_coding_url", "coding_url":
@@ -359,7 +376,7 @@ func (c *Config) GetEffectiveUserAgent() string {
 	}
 
 	// 根据伪装工具选择
-	if tool, ok := PredefinedDisguiseTools[c.DisguiseTool]; ok && tool.UserAgent != "" {
+	if tool, ok := PredefinedDisguiseTools[normalizeDisguiseTool(c.DisguiseTool)]; ok && tool.UserAgent != "" {
 		return tool.UserAgent
 	}
 
@@ -557,7 +574,7 @@ var Providers = map[string]ProviderConfig{
 	"custom": {
 		Name:           "自定义服务商",
 		CodingBaseURL:  "",
-		GeneralBaseURL:  "",
+		GeneralBaseURL: "",
 		AuthHeader:     "Authorization",
 		AuthPrefix:     "Bearer ",
 		UserAgent:      "opencode/0.3.0 (linux)",

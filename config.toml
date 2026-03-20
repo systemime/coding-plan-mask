@@ -36,8 +36,9 @@ local_api_key = "sk-local-your-secret-key"
 [endpoint]
 # 是否使用 Coding Plan 端点
 use_coding_endpoint = true
-# 伪装工具: opencode, openclaw, custom
-disguise_tool = "opencode"
+# 伪装工具: claudecode, kimicode, openclaw, custom
+# 兼容旧值: opencode
+disguise_tool = "claudecode"
 # 自定义 User-Agent (留空使用默认，仅当 disguise_tool = "custom" 时生效)
 custom_user_agent = ""
 

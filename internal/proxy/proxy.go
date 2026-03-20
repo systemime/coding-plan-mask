@@ -115,7 +115,7 @@ func (p *Proxy) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 	targetURL := fmt.Sprintf("%s/chat/completions", baseURL)
 
 	// 构建请求头
-	headers := p.buildHeaders(provider, codingAPIKey)
+	headers := p.buildHeaders(provider, codingAPIKey, stream)
 
 	// 日志记录
 	p.logger.Info("处理请求",
@@ -153,7 +153,7 @@ func (p *Proxy) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 	inputTokens := estimateInputTokens(reqBody)
 
 	// 处理响应
-	if stream {
+	if stream && resp.StatusCode == http.StatusOK && isEventStream(resp.Header.Get("Content-Type")) {
 		p.handleStreamResponseWithStats(w, resp, startTime, model, clientIP, inputTokens, string(body))
 	} else {
 		p.handleNormalResponseWithStats(w, resp, startTime, model, clientIP, inputTokens, string(body))
@@ -207,7 +207,7 @@ func (p *Proxy) Embeddings(w http.ResponseWriter, r *http.Request) {
 	targetURL := fmt.Sprintf("%s/embeddings", baseURL)
 
 	// 构建请求头
-	headers := p.buildHeaders(provider, codingAPIKey)
+	headers := p.buildHeaders(provider, codingAPIKey, false)
 
 	// 创建上游请求
 	upstreamReq, err := http.NewRequestWithContext(r.Context(), "POST", targetURL, bytes.NewReader(body))
@@ -282,15 +282,19 @@ func (p *Proxy) validateLocalAPIKey(r *http.Request) bool {
 }
 
 // buildHeaders 构建请求头
-func (p *Proxy) buildHeaders(provider *config.ProviderConfig, apiKey string) map[string]string {
+func (p *Proxy) buildHeaders(provider *config.ProviderConfig, apiKey string, stream bool) map[string]string {
 	// 获取有效的 User-Agent（基于伪装工具配置）
 	userAgent := p.cfg.GetEffectiveUserAgent()
+	accept := "application/json"
+	if stream {
+		accept = "text/event-stream"
+	}
 
 	headers := map[string]string{
 		"Content-Type":      "application/json",
 		provider.AuthHeader: provider.AuthPrefix + apiKey,
 		"User-Agent":        userAgent,
-		"Accept":            "text/event-stream",
+		"Accept":            accept,
 	}
 
 	// 添加额外头部
@@ -303,11 +307,16 @@ func (p *Proxy) buildHeaders(provider *config.ProviderConfig, apiKey string) map
 
 // handleStreamResponseWithStats 处理流式响应并统计
 func (p *Proxy) handleStreamResponseWithStats(w http.ResponseWriter, resp *http.Response, startTime time.Time, model, clientIP string, inputTokens int, requestBody string) {
+	copyHeaders(w.Header(), resp.Header)
+
 	// 设置 SSE 头
-	w.Header().Set("Content-Type", "text/event-stream")
+	if !isEventStream(w.Header().Get("Content-Type")) {
+		w.Header().Set("Content-Type", "text/event-stream")
+	}
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(resp.StatusCode)
 
 	// 获取 flusher
 	flusher, ok := w.(http.Flusher)
@@ -320,20 +329,17 @@ func (p *Proxy) handleStreamResponseWithStats(w http.ResponseWriter, resp *http.
 	var responseBuf bytes.Buffer
 	var outputTokens int
 
-	reader := bufio.NewReader(resp.Body)
-	scanner := bufio.NewScanner(reader)
+	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
 
 	for scanner.Scan() {
 		line := scanner.Text()
 		responseBuf.WriteString(line + "\n")
 
-		if line == "" {
-			continue
+		if _, err := fmt.Fprintln(w, line); err != nil {
+			p.logger.Warn("写入流式响应失败", zap.Error(err))
+			break
 		}
-
-		// 写入响应
-		fmt.Fprintln(w, line)
 		flusher.Flush()
 
 		// 解析 SSE 数据提取 token
@@ -358,6 +364,10 @@ func (p *Proxy) handleStreamResponseWithStats(w http.ResponseWriter, resp *http.
 				}
 			}
 		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		p.logger.Warn("读取流式响应失败", zap.Error(err))
 	}
 
 	duration := time.Since(startTime).Milliseconds()
@@ -472,15 +482,28 @@ func (p *Proxy) writeError(w http.ResponseWriter, code int, message string) {
 // Stats 返回统计信息
 func (p *Proxy) Stats() map[string]interface{} {
 	count, max, remaining := p.rateLimit.Stats()
-	stats, _ := p.storage.GetStats()
+	stats, err := p.storage.GetStats()
+	if err != nil || stats == nil {
+		stats = &storage.Stats{}
+	}
 	return map[string]interface{}{
 		"request_count":    count,
-		"rate_limit":         max,
-		"window_remaining":  remaining.String(),
-		"total_tokens":      stats.TotalTokens,
-		"total_input":       stats.TotalInputTokens,
-		"total_output":      stats.TotalOutputTokens,
+		"rate_limit":       max,
+		"window_remaining": remaining.String(),
+		"total_tokens":     stats.TotalTokens,
+		"total_input":      stats.TotalInputTokens,
+		"total_output":     stats.TotalOutputTokens,
 	}
+}
+
+func copyHeaders(dst, src http.Header) {
+	for k, values := range src {
+		dst[k] = append([]string(nil), values...)
+	}
+}
+
+func isEventStream(contentType string) bool {
+	return strings.Contains(strings.ToLower(contentType), "text/event-stream")
 }
 
 // getClientIP 获取客户端 IP

@@ -21,19 +21,21 @@ import (
 // Server HTTP 服务器
 type Server struct {
 	cfg     *config.Config
-	proxy  *proxy.Proxy
-	logger *zap.Logger
-	server *http.Server
-	store  *storage.Storage
+	proxy   *proxy.Proxy
+	logger  *zap.Logger
+	server  *http.Server
+	store   *storage.Storage
+	version string
 }
 
 // New 创建新服务器
-func New(cfg *config.Config, logger *zap.Logger, store *storage.Storage) *Server {
+func New(cfg *config.Config, logger *zap.Logger, store *storage.Storage, version string) *Server {
 	return &Server{
-		cfg:    cfg,
-		logger: logger,
-		proxy:  proxy.New(cfg, logger, store),
-		store:  store,
+		cfg:     cfg,
+		logger:  logger,
+		proxy:   proxy.New(cfg, logger, store),
+		store:   store,
+		version: version,
 	}
 }
 
@@ -84,16 +86,19 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 获取统计信息
-	stats, _ := s.store.GetStats()
+	stats, err := s.store.GetStats()
+	if err != nil || stats == nil {
+		stats = &storage.Stats{}
+	}
 
 	resp := map[string]interface{}{
-		"service":        "Coding Plan Proxy",
-		"version":       "2.0.0",
-		"provider":       provider.Name,
-		"status":         "running",
-		"models":         provider.Models,
-		"request_count":  stats.TotalRequests,
-		"total_tokens":   stats.TotalTokens,
+		"service":       "Coding Plan Proxy",
+		"version":       s.version,
+		"provider":      provider.Name,
+		"status":        "running",
+		"models":        provider.Models,
+		"request_count": stats.TotalRequests,
+		"total_tokens":  stats.TotalTokens,
 		"input_tokens":  stats.TotalInputTokens,
 		"output_tokens": stats.TotalOutputTokens,
 	}
@@ -117,9 +122,9 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	models := make([]map[string]interface{}, len(provider.Models))
 	for i, modelID := range provider.Models {
 		models[i] = map[string]interface{}{
-			"id":      modelID,
-			"object":  "model",
-			"created": 1700000000,
+			"id":       modelID,
+			"object":   "model",
+			"created":  1700000000,
 			"owned_by": provider.Name,
 		}
 	}

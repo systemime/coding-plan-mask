@@ -20,10 +20,10 @@ type Storage struct {
 	mu   sync.RWMutex
 
 	// 统计缓存
-	totalRequests   int64
+	totalRequests     int64
 	totalInputTokens  int64
 	totalOutputTokens int64
-	totalTokens     int64
+	totalTokens       int64
 }
 
 // RequestRecord 请求记录
@@ -67,17 +67,17 @@ type RequestRecordLite struct {
 
 // Stats 统计信息
 type Stats struct {
-	TotalRequests     int64 `json:"total_requests"`
-	TotalInputTokens  int64 `json:"total_input_tokens"`
-	TotalOutputTokens int64 `json:"total_output_tokens"`
-	TotalTokens       int64 `json:"total_tokens"`
-	TodayRequests     int64 `json:"today_requests"`
-	TodayInputTokens  int64 `json:"today_input_tokens"`
-	TodayOutputTokens int64 `json:"today_output_tokens"`
-	TodayTokens       int64 `json:"today_tokens"`
-	RequestsPerMin   float64 `json:"requests_per_min"`
-	InputPerMin     float64 `json:"input_per_min"`
-	OutputPerMin    float64 `json:"output_per_min"`
+	TotalRequests     int64   `json:"total_requests"`
+	TotalInputTokens  int64   `json:"total_input_tokens"`
+	TotalOutputTokens int64   `json:"total_output_tokens"`
+	TotalTokens       int64   `json:"total_tokens"`
+	TodayRequests     int64   `json:"today_requests"`
+	TodayInputTokens  int64   `json:"today_input_tokens"`
+	TodayOutputTokens int64   `json:"today_output_tokens"`
+	TodayTokens       int64   `json:"today_tokens"`
+	RequestsPerMin    float64 `json:"requests_per_min"`
+	InputPerMin       float64 `json:"input_per_min"`
+	OutputPerMin      float64 `json:"output_per_min"`
 }
 
 // New 创建存储实例
@@ -261,13 +261,13 @@ func (s *Storage) GetStats() (*Stats, error) {
 	`, fiveMinAgo).Scan(&reqCount, &inputSum, &outputSum)
 
 	if err == nil {
-		total.RequestsPerMin = 0
-		total.InputPerMin = 0
-		total.OutputPerMin = 0
-	} else {
 		total.RequestsPerMin = float64(reqCount) / 5
 		total.InputPerMin = float64(inputSum) / 5
 		total.OutputPerMin = float64(outputSum) / 5
+	} else {
+		total.RequestsPerMin = 0
+		total.InputPerMin = 0
+		total.OutputPerMin = 0
 	}
 
 	return &total, nil

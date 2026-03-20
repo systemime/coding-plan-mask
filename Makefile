@@ -2,6 +2,7 @@
 
 # Variables
 APP_NAME := mask-ctl
+SERVICE_BINARY := coding-plan-mask
 VERSION := 0.5.3
 BUILD_DIR := build
 BIN_DIR := $(BUILD_DIR)/bin
@@ -24,7 +25,7 @@ GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 # Linker flags
 LDFLAGS := -ldflags "-s -w -X main.version=$(VERSION) -X main.commit=$(GIT_COMMIT) -X main.date=$(BUILD_TIME)"
 
-.PHONY: all build clean install uninstall test run fmt vet help release
+.PHONY: all build clean install uninstall test test-race run fmt vet help release
 
 all: clean build
 
@@ -74,13 +75,15 @@ install: build
 	@mkdir -p $(INSTALL_DIR)/deploy
 	@mkdir -p $(CONFIG_DIR)
 	@mkdir -p /var/log/coding-plan-mask
-	@cp $(BIN_DIR)/$(APP_NAME) $(INSTALL_DIR)/bin/
+	@cp $(BIN_DIR)/$(APP_NAME) $(INSTALL_DIR)/bin/$(SERVICE_BINARY)
+	@ln -sf $(SERVICE_BINARY) $(INSTALL_DIR)/bin/$(APP_NAME)
 	@cp deploy/mask-ctl.sh $(INSTALL_DIR)/deploy/ 2>/dev/null || true
 	@chmod +x $(INSTALL_DIR)/deploy/mask-ctl.sh 2>/dev/null || true
 	@if [ ! -f $(CONFIG_DIR)/config.toml ]; then \
 		cp deploy/config.example.toml $(CONFIG_DIR)/config.toml 2>/dev/null || true; \
 	fi
-	@ln -sf $(INSTALL_DIR)/bin/$(APP_NAME) /usr/local/bin/$(APP_NAME)
+	@ln -sf $(INSTALL_DIR)/bin/$(SERVICE_BINARY) /usr/local/bin/$(APP_NAME)
+	@ln -sf $(INSTALL_DIR)/bin/$(SERVICE_BINARY) /usr/local/bin/$(SERVICE_BINARY)
 	@echo "Installation complete"
 	@echo ""
 	@echo "Usage:"
@@ -91,11 +94,15 @@ install: build
 uninstall:
 	@echo "Uninstalling $(APP_NAME)..."
 	@rm -f /usr/local/bin/$(APP_NAME)
+	@rm -f /usr/local/bin/$(SERVICE_BINARY)
 	@rm -rf $(INSTALL_DIR)
 	@rm -rf /var/log/coding-plan-mask
 	@echo "Uninstall complete"
 
 test:
+	CGO_ENABLED=0 $(GOTEST) -v -coverprofile=coverage.out ./...
+
+test-race:
 	$(GOTEST) -v -race -coverprofile=coverage.out ./...
 
 run: build

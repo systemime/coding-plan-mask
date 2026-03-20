@@ -50,8 +50,10 @@ type AuthConfig struct {
 
 // EndpointConfig 端点配置
 type EndpointConfig struct {
-	UseCodingEndpoint bool   `toml:"use_coding_endpoint"`
-	CustomUserAgent   string `toml:"custom_user_agent"`
+	UseCodingEndpoint   bool   `toml:"use_coding_endpoint"`
+	CustomUserAgent     string `toml:"custom_user_agent"`
+	ClaudeCodeUserAgent string `toml:"claude_code_user_agent"`
+	OpenClawUserAgent   string `toml:"openclaw_user_agent"`
 	// 伪装工具类型: claudecode, kimicode, openclaw, custom
 	// 兼容旧值: opencode
 	DisguiseTool string `toml:"disguise_tool"`
@@ -73,18 +75,20 @@ type APIConfig struct {
 type Config struct {
 	mu sync.RWMutex
 
-	Provider           string
-	APIKey             string
-	LocalAPIKey        string
-	ListenHost         string
-	ListenPort         int
-	UseCodingEndpoint  bool
-	CustomUserAgent    string
-	DisguiseTool       string // 伪装工具: claudecode, kimicode, openclaw, custom
-	Debug              bool
-	RateLimitRequests  int
-	Timeout            int
-	MaxRequestBodySize int64
+	Provider            string
+	APIKey              string
+	LocalAPIKey         string
+	ListenHost          string
+	ListenPort          int
+	UseCodingEndpoint   bool
+	CustomUserAgent     string
+	ClaudeCodeUserAgent string
+	OpenClawUserAgent   string
+	DisguiseTool        string // 伪装工具: claudecode, kimicode, openclaw, custom
+	Debug               bool
+	RateLimitRequests   int
+	Timeout             int
+	MaxRequestBodySize  int64
 
 	// 自定义 API 配置
 	CustomBaseURL    string
@@ -102,18 +106,24 @@ type DisguiseToolConfig struct {
 	ExtraInfo string
 }
 
+const (
+	DefaultClaudeCodeUserAgent = "claude-cli/2.1.76 (external, cli)"
+	DefaultOpenClawUserAgent   = "OpenClaw-Gateway/1.0"
+	ClaudeCodeAppHeaderValue   = "cli"
+)
+
 // PredefinedDisguiseTools 预定义的伪装工具
 // User-Agent 来源说明:
-// - claudecode: GitHub issues + Medium 流量分析, 格式 claude-code/<version>
-// - openclaw: GitHub issue #30099, OpenClaw 默认发送 OpenClaw-Gateway
+// - claudecode: 当前 Claude Code CLI 请求格式，默认值可通过配置覆盖
+// - openclaw: OpenClaw 部分请求路径会发送 OpenClaw-Gateway/1.0，本项目保留该兼容默认值并允许覆盖
 // - kimicode: Kimi Code API 订阅认证要求 claude-code/0.1.0
+// 参考: 本地 Claude Code 请求抓包与已安装 CLI 代码检查
 // 参考: https://github.com/openclaw/openclaw/issues/30099
-// 参考: https://medium.com/@yunwei356/reverse-engineering-claude-codes-ssl-traffic-with-ebpf-1dde03bcc7ef
 var PredefinedDisguiseTools = map[string]DisguiseToolConfig{
 	"claudecode": {
 		Name:      "Claude Code",
-		UserAgent: "claude-code/2.1.63",
-		ExtraInfo: "Anthropic 官方终端编程助手 (推荐)",
+		UserAgent: DefaultClaudeCodeUserAgent,
+		ExtraInfo: "Anthropic CLI 风格请求头（默认会附加 x-app: cli）",
 	},
 	"kimicode": {
 		Name:      "Kimi Code 兼容",
@@ -122,8 +132,8 @@ var PredefinedDisguiseTools = map[string]DisguiseToolConfig{
 	},
 	"openclaw": {
 		Name:      "OpenClaw",
-		UserAgent: "OpenClaw-Gateway/1.0",
-		ExtraInfo: "开源 AI 编程工具",
+		UserAgent: DefaultOpenClawUserAgent,
+		ExtraInfo: "OpenClaw 兼容默认值（可通过配置覆盖）",
 	},
 	"opencode": {
 		Name:      "OpenCode (Legacy)",
@@ -265,6 +275,8 @@ func LoadConfig(path string) (*Config, error) {
 
 	cfg.UseCodingEndpoint = cfgFile.Endpoint.UseCodingEndpoint
 	cfg.CustomUserAgent = cfgFile.Endpoint.CustomUserAgent
+	cfg.ClaudeCodeUserAgent = strings.TrimSpace(cfgFile.Endpoint.ClaudeCodeUserAgent)
+	cfg.OpenClawUserAgent = strings.TrimSpace(cfgFile.Endpoint.OpenClawUserAgent)
 	cfg.DisguiseTool = normalizeDisguiseTool(cfgFile.Endpoint.DisguiseTool)
 
 	// 自定义 API 配置
@@ -308,6 +320,12 @@ func (c *Config) loadFromEnv() {
 	if v := os.Getenv("CUSTOM_USER_AGENT"); v != "" {
 		c.CustomUserAgent = v
 	}
+	if v := os.Getenv("CLAUDE_CODE_USER_AGENT"); v != "" {
+		c.ClaudeCodeUserAgent = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("OPENCLAW_USER_AGENT"); v != "" {
+		c.OpenClawUserAgent = strings.TrimSpace(v)
+	}
 }
 
 // Set 设置配置项
@@ -336,6 +354,10 @@ func (c *Config) Set(key string, value string) error {
 		c.UseCodingEndpoint = strings.ToLower(value) == "true"
 	case "custom_user_agent":
 		c.CustomUserAgent = value
+	case "claude_code_user_agent":
+		c.ClaudeCodeUserAgent = strings.TrimSpace(value)
+	case "openclaw_user_agent":
+		c.OpenClawUserAgent = strings.TrimSpace(value)
 	case "disguise_tool":
 		c.DisguiseTool = normalizeDisguiseTool(value)
 	case "api_base_url", "base_url":
@@ -396,6 +418,13 @@ func (c *Config) GetEffectiveUserAgent() string {
 		return c.CustomUserAgent
 	}
 
+	if normalizeDisguiseTool(c.DisguiseTool) == "claudecode" && c.ClaudeCodeUserAgent != "" {
+		return c.ClaudeCodeUserAgent
+	}
+	if normalizeDisguiseTool(c.DisguiseTool) == "openclaw" && c.OpenClawUserAgent != "" {
+		return c.OpenClawUserAgent
+	}
+
 	// 根据伪装工具选择
 	if tool, ok := PredefinedDisguiseTools[normalizeDisguiseTool(c.DisguiseTool)]; ok && tool.UserAgent != "" {
 		return tool.UserAgent
@@ -403,6 +432,21 @@ func (c *Config) GetEffectiveUserAgent() string {
 
 	// 默认使用 claudecode
 	return PredefinedDisguiseTools["claudecode"].UserAgent
+}
+
+// GetDisguiseHeaders 返回伪装工具额外需要补充的请求头。
+func (c *Config) GetDisguiseHeaders() map[string]string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	switch normalizeDisguiseTool(c.DisguiseTool) {
+	case "claudecode":
+		return map[string]string{
+			"X-App": ClaudeCodeAppHeaderValue,
+		}
+	default:
+		return nil
+	}
 }
 
 // GetProviderConfigByName 根据名称获取服务商配置
@@ -420,19 +464,21 @@ func (c *Config) GetSafe() map[string]interface{} {
 	defer c.mu.RUnlock()
 
 	return map[string]interface{}{
-		"provider":            c.Provider,
-		"api_key":             maskAPIKey(c.APIKey),
-		"local_api_key":       maskAPIKey(c.LocalAPIKey),
-		"listen_host":         c.ListenHost,
-		"listen_port":         c.ListenPort,
-		"use_coding_endpoint": c.UseCodingEndpoint,
-		"disguise_tool":       c.DisguiseTool,
-		"custom_user_agent":   c.CustomUserAgent,
-		"debug":               c.Debug,
-		"rate_limit_requests": c.RateLimitRequests,
-		"timeout":             c.Timeout,
-		"api_base_url":        c.CustomBaseURL,
-		"api_coding_url":      c.CustomCodingURL,
+		"provider":               c.Provider,
+		"api_key":                maskAPIKey(c.APIKey),
+		"local_api_key":          maskAPIKey(c.LocalAPIKey),
+		"listen_host":            c.ListenHost,
+		"listen_port":            c.ListenPort,
+		"use_coding_endpoint":    c.UseCodingEndpoint,
+		"disguise_tool":          c.DisguiseTool,
+		"custom_user_agent":      c.CustomUserAgent,
+		"claude_code_user_agent": c.ClaudeCodeUserAgent,
+		"openclaw_user_agent":    c.OpenClawUserAgent,
+		"debug":                  c.Debug,
+		"rate_limit_requests":    c.RateLimitRequests,
+		"timeout":                c.Timeout,
+		"api_base_url":           c.CustomBaseURL,
+		"api_coding_url":         c.CustomCodingURL,
 	}
 }
 
@@ -510,6 +556,12 @@ local_api_key = "sk-local-your-secret-key"
 use_coding_endpoint = true
 # 伪装工具: claudecode, kimicode, openclaw, custom
 disguise_tool = "claudecode"
+# Claude Code 模式的默认 User-Agent
+# 默认值基于当前 Claude Code CLI 的真实请求格式
+claude_code_user_agent = "claude-cli/2.1.76 (external, cli)"
+# OpenClaw 模式的兼容默认 User-Agent
+# 该值用于兼容部分 OpenClaw 请求路径，可按需覆盖
+openclaw_user_agent = "OpenClaw-Gateway/1.0"
 # 自定义 User-Agent (留空使用默认，仅当 disguise_tool = "custom" 时生效)
 custom_user_agent = ""
 

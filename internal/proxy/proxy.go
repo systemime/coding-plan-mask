@@ -200,6 +200,12 @@ func (p *Proxy) buildHeaders(provider *config.ProviderConfig, apiKey string, req
 	headers.Set(provider.AuthHeader, provider.AuthPrefix+apiKey)
 	headers.Set("User-Agent", userAgent)
 
+	for k, v := range p.cfg.GetDisguiseHeaders() {
+		if headers.Get(k) == "" {
+			headers.Set(k, v)
+		}
+	}
+
 	// 添加额外头部
 	for k, v := range provider.ExtraHeaders {
 		headers.Set(k, v)

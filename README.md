@@ -6,7 +6,7 @@
 
 [![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://golang.org/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.7.0-green.svg)](https://github.com/systemime/coding-plan-mask)
+[![Version](https://img.shields.io/badge/version-0.7.1-green.svg)](https://github.com/systemime/coding-plan-mask)
 
 *Use your Coding Plan subscription with ANY OpenAI-compatible coding tool*
 
@@ -28,27 +28,7 @@ Major AI providers (Zhipu GLM, Alibaba Cloud, MiniMax, DeepSeek, Moonshot, etc.)
 | ✅ Access to powerful models | ❌ **Cannot use in your favorite tools** |
 | ✅ Official API Key provided | ❌ **Cannot use for automation/backend** |
 
-#### 🔒 Official Restrictions
-
-| Allowed | Forbidden |
-|---------|-----------|
-| ✅ Claude Code, Cursor, Cline | ❌ Your own AI tools |
-| ✅ VS Code extensions | ❌ Custom scripts |
-| ✅ Interactive coding | ❌ Automated workflows |
-| | ❌ Backend integration |
-| | ❌ Dify, FastGPT platforms |
-
-**Violation Consequence**: Subscription suspension or API Key ban
-
-#### 📊 Provider Comparison
-
-| Provider | Monthly Fee | Models | Can Use in Custom Tools? |
-|----------|-------------|--------|-------------------------|
-| Zhipu GLM | $3-15+ | GLM-4.7, GLM-5 | ❌ No |
-| Alibaba Cloud | $5.80-29 | Qwen, GLM, MiniMax, Kimi | ❌ No |
-| MiniMax | Subscription | M2.1 (not M2.5!) | ❌ No |
-| DeepSeek | Subscription | DeepSeek V3 | ❌ No |
-| Moonshot | Subscription | Kimi | ❌ No |
+Provider rules, available models, and subscription details can change over time. Treat current provider policy as an external dependency and verify it yourself before use.
 
 ### 💡 The Solution: Coding Plan Mask
 
@@ -67,6 +47,7 @@ Major AI providers (Zhipu GLM, Alibaba Cloud, MiniMax, DeepSeek, Moonshot, etc.)
 |---------|-------------|
 | 🎭 **Tool Masking** | Mask as Claude Code, Kimi Code, OpenClaw or custom tool |
 | 🔀 **Request Relay** | Transparently forward arbitrary upstream API paths |
+| 🧩 **Claude CLI Disguise** | `claudecode` mode uses a Claude CLI-style `User-Agent` and injects `x-app: cli` when missing |
 | 🔌 **Universal Compatibility** | Works with ANY OpenAI-compatible client |
 | 🌐 **Multi-Provider** | Support for 6+ major LLM providers |
 | 📊 **Usage Analytics** | Track token consumption in real-time with SQLite storage |
@@ -86,22 +67,22 @@ Download the binary for your platform from [GitHub Releases](https://github.com/
 
 ```bash
 # Linux amd64
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.0/mask-ctl-linux-amd64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.1/mask-ctl-linux-amd64
 chmod +x mask-ctl-linux-amd64
 sudo mv mask-ctl-linux-amd64 /usr/local/bin/mask-ctl
 
 # Linux arm64
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.0/mask-ctl-linux-arm64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.1/mask-ctl-linux-arm64
 chmod +x mask-ctl-linux-arm64
 sudo mv mask-ctl-linux-arm64 /usr/local/bin/mask-ctl
 
 # macOS (Darwin amd64)
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.0/mask-ctl-darwin-amd64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.1/mask-ctl-darwin-amd64
 chmod +x mask-ctl-darwin-amd64
 sudo mv mask-ctl-darwin-amd64 /usr/local/bin/mask-ctl
 
 # macOS (Darwin arm64)
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.0/mask-ctl-darwin-arm64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.1/mask-ctl-darwin-arm64
 chmod +x mask-ctl-darwin-arm64
 sudo mv mask-ctl-darwin-arm64 /usr/local/bin/mask-ctl
 
@@ -159,7 +140,8 @@ local_api_key = "sk-local-secret"   # Key for your tools to use
 
 [endpoint]
 use_coding_endpoint = true
-disguise_tool = "claudecode"        # Mask as Claude Code (recommended)
+disguise_tool = "claudecode"        # Mask as Claude Code-style CLI traffic
+claude_code_user_agent = "claude-cli/2.1.76 (external, cli)"
 ```
 
 #### 4. Start
@@ -205,21 +187,24 @@ In non-debug mode, startup keeps the banner output and proxy activity is shown i
 ```toml
 [endpoint]
 # Mask as officially supported tools
-disguise_tool = "claudecode"  # Claude Code (recommended, compatible with Zhipu/Kimi)
+disguise_tool = "claudecode"  # Claude Code-style CLI traffic
+# claude_code_user_agent = "claude-cli/2.1.76 (external, cli)"
 # disguise_tool = "kimicode"    # Kimi Code API subscription auth format
 # disguise_tool = "openclaw"    # OpenClaw
+# openclaw_user_agent = "OpenClaw-Gateway/1.0"
 # disguise_tool = "custom"     # Use custom User-Agent
 # custom_user_agent = "YourCustomTool/1.0"
 ```
 
 | Tool | Identifier | User-Agent | Description |
 |------|------------|------------|-------------|
-| **Claude Code** | `claudecode` | `claude-code/2.1.63` | Anthropic official terminal coding assistant (recommended) |
+| **Claude Code** | `claudecode` | `claude-cli/2.1.76 (external, cli)` | Current default Claude CLI-style UA, configurable via `claude_code_user_agent` |
 | **Kimi Code** | `kimicode` | `claude-code/0.1.0` | Kimi Code API subscription auth format |
-| **OpenClaw** | `openclaw` | `OpenClaw-Gateway/1.0` | Open-source AI coding tool |
+| **OpenClaw** | `openclaw` | `OpenClaw-Gateway/1.0` | Compatibility default, configurable via `openclaw_user_agent` |
 | **Custom** | `custom` | (custom) | Use `custom_user_agent` config |
 
-> **Note**: User-Agent values are sourced from official documentation and GitHub issues.
+> **Note**: `claudecode` mode also injects `x-app: cli` if the incoming request does not already provide it.
+> **Note**: `openclaw` mode keeps `OpenClaw-Gateway/1.0` as a compatibility default, but this does not imply every current OpenClaw request path uses the same UA.
 
 ### 📡 API Endpoints
 
@@ -264,6 +249,8 @@ You can also configure via environment variables:
 | `API_BASE_URL` | Custom API base URL |
 | `API_CODING_URL` | Custom coding endpoint URL |
 | `DISGUISE_TOOL` | Override disguise tool |
+| `CLAUDE_CODE_USER_AGENT` | Override the default UA used by `claudecode` mode |
+| `OPENCLAW_USER_AGENT` | Override the compatibility UA used by `openclaw` mode |
 | `CUSTOM_USER_AGENT` | Override User-Agent directly |
 
 ### ⚠️ Risk Warning
@@ -309,6 +296,7 @@ This project is provided for **educational and research purposes only**.
 |------|------|
 | 🎭 **工具伪装** | 伪装为 Claude Code、Kimi Code、OpenClaw 或自定义工具 |
 | 🔀 **请求中转** | 透传任意上游 API 路径，并附加伪装请求头 |
+| 🧩 **Claude CLI 伪装** | `claudecode` 模式默认使用 Claude CLI 风格 `User-Agent`，并在缺失时补 `x-app: cli` |
 | 🔌 **通用兼容** | 兼容任何支持 OpenAI API 的客户端 |
 | 🌐 **多供应商** | 支持 6+ 主流大模型供应商 |
 | 📊 **用量统计** | 实时追踪 Token 消耗，SQLite 持久化存储 |
@@ -325,22 +313,22 @@ This project is provided for **educational and research purposes only**.
 
 ```bash
 # Linux amd64
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.0/mask-ctl-linux-amd64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.1/mask-ctl-linux-amd64
 chmod +x mask-ctl-linux-amd64
 sudo mv mask-ctl-linux-amd64 /usr/local/bin/mask-ctl
 
 # Linux arm64
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.0/mask-ctl-linux-arm64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.1/mask-ctl-linux-arm64
 chmod +x mask-ctl-linux-arm64
 sudo mv mask-ctl-linux-arm64 /usr/local/bin/mask-ctl
 
 # macOS amd64
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.0/mask-ctl-darwin-amd64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.1/mask-ctl-darwin-amd64
 chmod +x mask-ctl-darwin-amd64
 sudo mv mask-ctl-darwin-amd64 /usr/local/bin/mask-ctl
 
 # macOS arm64
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.0/mask-ctl-darwin-arm64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.1/mask-ctl-darwin-arm64
 chmod +x mask-ctl-darwin-arm64
 sudo mv mask-ctl-darwin-arm64 /usr/local/bin/mask-ctl
 ```
@@ -393,7 +381,9 @@ local_api_key = "sk-local-secret"   # 你的工具使用的密钥
 
 [endpoint]
 use_coding_endpoint = true
-disguise_tool = "claudecode"        # 伪装为 Claude Code (推荐)
+disguise_tool = "claudecode"        # 伪装为 Claude Code 风格 CLI 请求
+claude_code_user_agent = "claude-cli/2.1.76 (external, cli)"
+openclaw_user_agent = "OpenClaw-Gateway/1.0"
 ```
 
 #### 4. 启动
@@ -436,10 +426,13 @@ sudo systemctl start coding-plan-mask
 
 | 工具 | 标识符 | User-Agent | 说明 |
 |------|--------|------------|------|
-| **Claude Code** | `claudecode` | `claude-code/2.1.63` | Anthropic 官方终端编程助手 (推荐) |
+| **Claude Code** | `claudecode` | `claude-cli/2.1.76 (external, cli)` | 当前默认 Claude CLI 风格 UA，可通过 `claude_code_user_agent` 覆盖 |
 | **Kimi Code** | `kimicode` | `claude-code/0.1.0` | Kimi Code API 订阅认证格式 |
-| **OpenClaw** | `openclaw` | `OpenClaw-Gateway/1.0` | 开源 AI 编程工具 |
+| **OpenClaw** | `openclaw` | `OpenClaw-Gateway/1.0` | 兼容默认值，可通过 `openclaw_user_agent` 覆盖 |
 | **自定义** | `custom` | (自定义) | 使用 `custom_user_agent` 配置 |
+
+> **说明**：`claudecode` 模式在传入请求未提供时还会补充 `x-app: cli`。
+> **说明**：`openclaw` 模式保留 `OpenClaw-Gateway/1.0` 作为兼容默认值，但这不代表当前 OpenClaw 所有请求路径都统一使用该 UA。
 
 ### 📡 API 端点
 
@@ -482,6 +475,8 @@ curl http://127.0.0.1:8787/stats
 | `API_BASE_URL` | 自定义通用 API 基础 URL |
 | `API_CODING_URL` | 自定义 Coding API URL |
 | `DISGUISE_TOOL` | 覆盖伪装工具 |
+| `CLAUDE_CODE_USER_AGENT` | 覆盖 `claudecode` 模式默认 User-Agent |
+| `OPENCLAW_USER_AGENT` | 覆盖 `openclaw` 模式兼容默认 User-Agent |
 | `CUSTOM_USER_AGENT` | 直接覆盖 User-Agent |
 
 ### ⚠️ 风险预警

@@ -13,34 +13,27 @@
 | **计费逻辑** | 未伪装的请求会从资源包扣费，而非 Coding Plan 订阅 |
 
 **关键发现**：
-- Claude Code CLI 的 User-Agent 格式：`claude-code/<version>` 或 `claude-cli/<version> (external, sdk-cli)`
+- Claude Code CLI 的 User-Agent 格式存在模式差异，当前更接近 `claude-cli/<version> (external, cli)`
 - OpenCode 使用：`opencode/0.3.0 (linux)` (项目已归档，更名为 Crush)
-- OpenClaw 使用：`OpenClaw-Gateway/1.0`
+- OpenClaw 在部分请求路径中使用：`OpenClaw-Gateway/1.0`
 
 ### 1.2 当前项目实现分析
 
-**文件**: `internal/proxy/proxy.go:284-303`
+**文件**: `internal/proxy/proxy.go`
 
-```go
-func (p *Proxy) buildHeaders(provider *config.ProviderConfig, apiKey string) map[string]string {
-    userAgent := p.cfg.GetEffectiveUserAgent()
-    headers := map[string]string{
-        "Content-Type":      "application/json",
-        provider.AuthHeader: provider.AuthPrefix + apiKey,
-        "User-Agent":        userAgent,          // ← 伪装关键点
-        "X-Client-Type":     "coding-tool",      // ← 额外标识
-        "Accept":            "text/event-stream",
-    }
-    // ...
-}
-```
+当前实现会：
+- 保留客户端原始请求头
+- 覆盖上游认证头
+- 覆盖 `User-Agent`
+- 在 `claudecode` 模式下补充 `x-app: cli`（如果来包未提供）
 
 **预定义伪装工具** (`internal/config/config.go:104-121`):
 ```go
 var PredefinedDisguiseTools = map[string]DisguiseToolConfig{
-    "opencode": {UserAgent: "opencode/0.3.0 (linux)"},
-    "openclaw": {UserAgent: "OpenClaw-Gateway/1.0"},
-    "custom":   {UserAgent: ""}, // 使用自定义值
+    "claudecode": {UserAgent: "claude-cli/2.1.76 (external, cli)"},
+    "kimicode":   {UserAgent: "claude-code/0.1.0"},
+    "openclaw":   {UserAgent: "OpenClaw-Gateway/1.0"}, // 兼容默认值，可配置覆盖
+    "custom":     {UserAgent: ""}, // 使用自定义值
 }
 ```
 
@@ -64,11 +57,11 @@ var PredefinedDisguiseTools = map[string]DisguiseToolConfig{
 **对比项目 HTTP 客户端实现与官方工具的差异**
 
 #### Claude Code 实现特征
-根据 [Kong AI Gateway 文档](https://developer.konghq.com/how-to/use-claude-code-with-ai-gateway-anthropic/)：
+根据本地抓包与已安装 Claude Code 代码检查：
 
 ```
-User-Agent: claude-code/2.0.64
-x-service-name: claude-code
+User-Agent: claude-cli/2.1.76 (external, cli)
+x-app: cli
 ```
 
 #### OpenCode 实现特征
@@ -84,12 +77,12 @@ x-service-name: claude-code
 **差异点**:
 | 项目 | User-Agent | 额外 Header |
 |------|------------|-------------|
-| Claude Code | `claude-code/2.0.64` | `x-service-name: claude-code` |
+| Claude Code | `claude-cli/2.1.76 (external, cli)` | `x-app: cli` |
 | OpenCode | `opencode/0.3.0 (linux)` | 无 |
-| OpenClaw | `OpenClaw-Gateway/1.0` | 无 |
-| **当前项目** | `opencode/0.3.0 (linux)` | `X-Client-Type: coding-tool` |
+| OpenClaw | `OpenClaw-Gateway/1.0`（部分路径） | 无 |
+| **当前项目** | `claude-cli/2.1.76 (external, cli)` / `OpenClaw-Gateway/1.0` | `x-app: cli`（仅 `claudecode` 模式） |
 
-**风险点**: `X-Client-Type: coding-tool` 是项目自定义的，可能暴露伪装意图。
+**风险点**: Claude Code 的真实请求特征可能继续演进，默认 UA 需要随版本校准。
 
 ---
 
@@ -271,21 +264,21 @@ func estimateInputTokens(reqBody map[string]interface{}) int {
 ```go
 // config.go
 // User-Agent 来源说明:
-// - claudecode: GitHub issues + Medium 流量分析, 格式 claude-code/<version>
-// - openclaw: GitHub issue #30099, OpenClaw 默认发送 OpenClaw-Gateway
+// - claudecode: 当前 Claude Code CLI 请求格式，默认值可通过配置覆盖
+// - openclaw: OpenClaw 部分请求路径会发送 OpenClaw-Gateway/1.0，本项目保留该兼容默认值并允许覆盖
 // - kimicode: Kimi Code API 订阅认证要求 claude-code/0.1.0
 var PredefinedDisguiseTools = map[string]DisguiseToolConfig{
-    "claudecode": {UserAgent: "claude-code/2.1.63"}, // 推荐, 兼容智谱/Kimi
+    "claudecode": {UserAgent: "claude-cli/2.1.76 (external, cli)"},
     "kimicode":   {UserAgent: "claude-code/0.1.0"},  // Kimi Code API 订阅认证格式
-    "openclaw":   {UserAgent: "OpenClaw-Gateway/1.0"},
+    "openclaw":   {UserAgent: "OpenClaw-Gateway/1.0"}, // 兼容默认值，可配置覆盖
     "custom":     {UserAgent: ""},                   // 使用自定义值
 }
 ```
 
 **参考来源**:
-- [Claude Code GitHub Issues](https://github.com/anthropics/claude-code/issues/34804)
 - [OpenClaw Issue #30099](https://github.com/openclaw/openclaw/issues/30099)
-- [Claude Code SSL Traffic Analysis](https://medium.com/@yunwei356/reverse-engineering-claude-codes-ssl-traffic-with-ebpf-1dde03bcc7ef)
+- 本地 Claude Code 请求抓包
+- 已安装 Claude Code CLI 代码检查
 - [Linux.do 智谱 CC 月包讨论](https://linux.do/t/topic/934378)
 
 ---

@@ -39,6 +39,12 @@ use_coding_endpoint = true
 # 伪装工具: claudecode, kimicode, openclaw, custom
 # 兼容旧值: opencode
 disguise_tool = "claudecode"
+# Claude Code 模式的默认 User-Agent
+# 默认值基于当前 Claude Code CLI 的真实请求格式
+claude_code_user_agent = "claude-cli/2.1.76 (external, cli)"
+# OpenClaw 模式的兼容默认 User-Agent
+# 该值用于兼容部分 OpenClaw 请求路径，可按需覆盖
+openclaw_user_agent = "OpenClaw-Gateway/1.0"
 # 自定义 User-Agent (留空使用默认，仅当 disguise_tool = "custom" 时生效)
 custom_user_agent = ""
 

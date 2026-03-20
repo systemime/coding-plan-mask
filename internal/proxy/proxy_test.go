@@ -49,8 +49,33 @@ func TestBuildHeadersPreservesRequestHeadersAndOverridesAuth(t *testing.T) {
 	if got := headers.Get("User-Agent"); got != cfg.GetEffectiveUserAgent() {
 		t.Fatalf("expected disguised User-Agent, got %q", got)
 	}
+	if got := headers.Get("X-App"); got != config.ClaudeCodeAppHeaderValue {
+		t.Fatalf("expected Claude Code X-App header, got %q", got)
+	}
 	if got := headers.Get("X-Custom"); got != "custom-value" {
 		t.Fatalf("expected custom header to be preserved, got %q", got)
+	}
+}
+
+func TestBuildHeadersPreservesExistingXAppHeader(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.DisguiseTool = "claudecode"
+
+	p := &Proxy{cfg: cfg}
+	provider := &config.ProviderConfig{
+		AuthHeader:   "Authorization",
+		AuthPrefix:   "Bearer ",
+		ExtraHeaders: map[string]string{},
+	}
+
+	requestHeaders := http.Header{
+		"Authorization": []string{"Bearer local-key"},
+		"X-App":         []string{"custom-cli"},
+	}
+
+	headers := p.buildHeaders(provider, "test-key", requestHeaders)
+	if got := headers.Get("X-App"); got != "custom-cli" {
+		t.Fatalf("expected existing X-App header to be preserved, got %q", got)
 	}
 }
 

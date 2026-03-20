@@ -24,6 +24,36 @@ func TestGetEffectiveUserAgentFallsBackToClaudeCode(t *testing.T) {
 	}
 }
 
+func TestGetEffectiveUserAgentUsesClaudeCodeOverride(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.DisguiseTool = "claudecode"
+	cfg.ClaudeCodeUserAgent = "claude-cli/9.9.9 (external, cli)"
+
+	if got := cfg.GetEffectiveUserAgent(); got != cfg.ClaudeCodeUserAgent {
+		t.Fatalf("expected Claude Code override user agent, got %q", got)
+	}
+}
+
+func TestGetDisguiseHeadersAddsXAppForClaudeCode(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.DisguiseTool = "claudecode"
+
+	headers := cfg.GetDisguiseHeaders()
+	if got := headers["X-App"]; got != ClaudeCodeAppHeaderValue {
+		t.Fatalf("expected X-App disguise header %q, got %q", ClaudeCodeAppHeaderValue, got)
+	}
+}
+
+func TestGetEffectiveUserAgentUsesOpenClawOverride(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.DisguiseTool = "openclaw"
+	cfg.OpenClawUserAgent = "OpenClaw-Compatible/9.9"
+
+	if got := cfg.GetEffectiveUserAgent(); got != cfg.OpenClawUserAgent {
+		t.Fatalf("expected OpenClaw override user agent, got %q", got)
+	}
+}
+
 func TestFindConfigInDirPrefersConfigToml(t *testing.T) {
 	dir := t.TempDir()
 

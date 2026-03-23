@@ -185,7 +185,7 @@ func TestHandleStreamResponsePreservesEventBoundaries(t *testing.T) {
 		Body: io.NopCloser(strings.NewReader("data: {\"usage\":{\"completion_tokens\":3}}\n\ndata: [DONE]\n\n")),
 	}
 
-	p.handleStreamResponseWithStats(recorder, resp, time.Now(), http.MethodPost, "/chat/completions", "glm-4-flash", "127.0.0.1", 2, "{}")
+	p.handleStreamResponseWithStats(recorder, resp, time.Now(), http.MethodPost, "/chat/completions", "https://api.example.com/chat/completions", "glm-4-flash", "127.0.0.1", 2, "{}")
 
 	body := recorder.Body.String()
 	if !strings.Contains(body, "\n\n") {

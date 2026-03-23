@@ -149,9 +149,9 @@ func (p *Proxy) Forward(w http.ResponseWriter, r *http.Request) {
 
 	// 处理响应
 	if resp.StatusCode == http.StatusOK && isEventStream(resp.Header.Get("Content-Type")) {
-		p.handleStreamResponseWithStats(w, resp, startTime, r.Method, r.URL.Path, model, clientIP, inputTokens, string(body))
+		p.handleStreamResponseWithStats(w, resp, startTime, r.Method, r.URL.Path, targetURL, model, clientIP, inputTokens, string(body))
 	} else {
-		p.handleNormalResponseWithStats(w, resp, startTime, r.Method, r.URL.Path, model, clientIP, inputTokens, string(body))
+		p.handleNormalResponseWithStats(w, resp, startTime, r.Method, r.URL.Path, targetURL, model, clientIP, inputTokens, string(body))
 	}
 }
 
@@ -215,7 +215,7 @@ func (p *Proxy) buildHeaders(provider *config.ProviderConfig, apiKey string, req
 }
 
 // handleStreamResponseWithStats 处理流式响应并统计
-func (p *Proxy) handleStreamResponseWithStats(w http.ResponseWriter, resp *http.Response, startTime time.Time, method, path, model, clientIP string, inputTokens int, requestBody string) {
+func (p *Proxy) handleStreamResponseWithStats(w http.ResponseWriter, resp *http.Response, startTime time.Time, method, path, targetURL, model, clientIP string, inputTokens int, requestBody string) {
 	copyHeaders(w.Header(), resp.Header)
 
 	// 设置 SSE 头
@@ -289,7 +289,8 @@ func (p *Proxy) handleStreamResponseWithStats(w http.ResponseWriter, resp *http.
 	duration := time.Since(startTime).Milliseconds()
 	totalTokens := inputTokens + outputTokens
 
-	p.logForwardResponse(model, outputTokens)
+	// 打印响应日志
+	p.logResponse(method, path, targetURL, resp.StatusCode, duration, clientIP, responseBuf.String())
 
 	// 保存记录
 	record := &storage.RequestRecord{
@@ -314,7 +315,7 @@ func (p *Proxy) handleStreamResponseWithStats(w http.ResponseWriter, resp *http.
 }
 
 // handleNormalResponseWithStats 处理普通响应并统计
-func (p *Proxy) handleNormalResponseWithStats(w http.ResponseWriter, resp *http.Response, startTime time.Time, method, path, model, clientIP string, inputTokens int, requestBody string) {
+func (p *Proxy) handleNormalResponseWithStats(w http.ResponseWriter, resp *http.Response, startTime time.Time, method, path, targetURL, model, clientIP string, inputTokens int, requestBody string) {
 	// 读取响应体
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -350,7 +351,8 @@ func (p *Proxy) handleNormalResponseWithStats(w http.ResponseWriter, resp *http.
 
 	totalTokens := inputTokens + outputTokens
 
-	p.logForwardResponse(model, outputTokens)
+	// 打印响应日志
+	p.logResponse(method, path, targetURL, resp.StatusCode, duration, clientIP, string(respBody))
 
 	// 保存记录
 	record := &storage.RequestRecord{
@@ -508,6 +510,33 @@ func (p *Proxy) logForwardResponse(model string, outputTokens int) {
 		return
 	}
 	fmt.Fprintf(p.logOutput(), "时间：%s 转发响应：模型：%s token数：%d\n", humanLogTime(), displayModel(model), outputTokens)
+}
+
+// logResponse 打印响应日志
+func (p *Proxy) logResponse(method, path, targetURL string, statusCode int, duration int64, clientIP, responseBody string) {
+	// 判断是否是错误状态码 (4xx 或 5xx)
+	isError := statusCode >= 400 && statusCode < 600
+
+	fields := []zap.Field{
+		zap.String("method", method),
+		zap.String("path", path),
+		zap.String("target", targetURL),
+		zap.Int("status", statusCode),
+		zap.Int64("duration_ms", duration),
+		zap.String("remote", clientIP),
+	}
+
+	if isError {
+		// 限制响应体长度，避免日志过大
+		truncatedBody := responseBody
+		if len(truncatedBody) > 500 {
+			truncatedBody = truncatedBody[:500] + "...(truncated)"
+		}
+		fields = append(fields, zap.String("response", truncatedBody))
+		p.logger.Warn("代理响应", fields...)
+	} else {
+		p.logger.Info("代理响应", fields...)
+	}
 }
 
 func (p *Proxy) logOutput() io.Writer {

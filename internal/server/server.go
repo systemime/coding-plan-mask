@@ -156,14 +156,22 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 
 		duration := time.Since(start)
 
-		s.logger.Info("HTTP 请求",
-			zap.String("method", r.Method),
-			zap.String("path", r.URL.Path),
-			zap.Int("status", wrapped.statusCode),
-			zap.Duration("duration", duration),
-			zap.String("remote", r.RemoteAddr),
-		)
+		// 只记录本地管理端点的日志，代理请求由 proxy 模块记录详细日志
+		if isLocalEndpoint(r.URL.Path) {
+			s.logger.Info("HTTP 请求",
+				zap.String("method", r.Method),
+				zap.String("path", r.URL.Path),
+				zap.Int("status", wrapped.statusCode),
+				zap.Duration("duration", duration),
+				zap.String("remote", r.RemoteAddr),
+			)
+		}
 	})
+}
+
+// isLocalEndpoint 判断是否是本地管理端点
+func isLocalEndpoint(path string) bool {
+	return path == "/" || path == "/health" || path == "/ready" || path == "/stats"
 }
 
 // securityMiddleware 安全头中间件

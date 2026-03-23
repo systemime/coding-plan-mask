@@ -70,6 +70,9 @@ type APIConfig struct {
 	AuthHeader string `toml:"auth_header"`
 	// 认证前缀
 	AuthPrefix string `toml:"auth_prefix"`
+	// 删除代理伪装请求的版本控制路径
+	// 例如：请求 /v1/models 时，转发时只拼接 /models 部分
+	RemoveVersionPath bool `toml:"remove_version_path"`
 }
 
 // Config 应用配置（运行时使用）
@@ -93,10 +96,11 @@ type Config struct {
 	MaxRequestBodySize  int64
 
 	// 自定义 API 配置
-	CustomBaseURL    string
-	CustomCodingURL  string
-	CustomAuthHeader string
-	CustomAuthPrefix string
+	CustomBaseURL     string
+	CustomCodingURL   string
+	CustomAuthHeader  string
+	CustomAuthPrefix  string
+	RemoveVersionPath bool
 
 	configPath string
 }
@@ -289,6 +293,7 @@ func LoadConfig(path string) (*Config, error) {
 	cfg.CustomCodingURL = cfgFile.API.CodingURL
 	cfg.CustomAuthHeader = cfgFile.API.AuthHeader
 	cfg.CustomAuthPrefix = cfgFile.API.AuthPrefix
+	cfg.RemoveVersionPath = cfgFile.API.RemoveVersionPath
 
 	cfg.loadFromEnv()
 	return cfg, nil
@@ -334,6 +339,9 @@ func (c *Config) loadFromEnv() {
 	if v := os.Getenv("OPENCODE_USER_AGENT"); v != "" {
 		c.OpenCodeUserAgent = strings.TrimSpace(v)
 	}
+	if v := os.Getenv("REMOVE_VERSION_PATH"); strings.ToLower(v) == "true" {
+		c.RemoveVersionPath = true
+	}
 }
 
 // Set 设置配置项
@@ -378,6 +386,8 @@ func (c *Config) Set(key string, value string) error {
 		c.CustomAuthHeader = value
 	case "auth_prefix":
 		c.CustomAuthPrefix = value
+	case "remove_version_path":
+		c.RemoveVersionPath = strings.ToLower(value) == "true"
 	default:
 		return fmt.Errorf("未知配置项: %s", key)
 	}
@@ -493,6 +503,7 @@ func (c *Config) GetSafe() map[string]interface{} {
 		"timeout":                c.Timeout,
 		"api_base_url":           c.CustomBaseURL,
 		"api_coding_url":         c.CustomCodingURL,
+		"remove_version_path":    c.RemoveVersionPath,
 	}
 }
 
@@ -594,6 +605,9 @@ coding_url = ""
 auth_header = ""
 # 认证前缀 (留空使用默认 "Bearer ")
 auth_prefix = ""
+# 删除代理伪装请求的版本控制路径 (默认 false)
+# 例如：请求 /v1/models 时，转发时只拼接 /models 部分
+remove_version_path = false
 `
 
 	return os.WriteFile(path, []byte(defaultContent), 0644)

@@ -6,7 +6,7 @@
 
 [![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://golang.org/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.8.0-green.svg)](https://github.com/systemime/coding-plan-mask)
+[![Version](https://img.shields.io/badge/version-0.8.1-green.svg)](https://github.com/systemime/coding-plan-mask)
 
 *Use your Coding Plan subscription with ANY OpenAI-compatible coding tool*
 
@@ -67,22 +67,22 @@ Download the binary for your platform from [GitHub Releases](https://github.com/
 
 ```bash
 # Linux amd64
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.0/mask-ctl-linux-amd64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.1/mask-ctl-linux-amd64
 chmod +x mask-ctl-linux-amd64
 sudo mv mask-ctl-linux-amd64 /usr/local/bin/mask-ctl
 
 # Linux arm64
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.0/mask-ctl-linux-arm64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.1/mask-ctl-linux-arm64
 chmod +x mask-ctl-linux-arm64
 sudo mv mask-ctl-linux-arm64 /usr/local/bin/mask-ctl
 
 # macOS (Darwin amd64)
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.0/mask-ctl-darwin-amd64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.1/mask-ctl-darwin-amd64
 chmod +x mask-ctl-darwin-amd64
 sudo mv mask-ctl-darwin-amd64 /usr/local/bin/mask-ctl
 
 # macOS (Darwin arm64)
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.0/mask-ctl-darwin-arm64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.1/mask-ctl-darwin-arm64
 chmod +x mask-ctl-darwin-arm64
 sudo mv mask-ctl-darwin-arm64 /usr/local/bin/mask-ctl
 
@@ -142,6 +142,11 @@ local_api_key = "sk-local-secret"   # Key for your tools to use
 use_coding_endpoint = true
 disguise_tool = "claudecode"        # Mask as Claude Code-style CLI traffic
 claude_code_user_agent = "claude-cli/2.1.76 (external, cli)"
+
+[api]
+# Optional: Remove version prefix (e.g., /v1) from request path when forwarding
+# Example: Request to /v1/models will be forwarded as /models only
+remove_version_path = false
 ```
 
 #### 4. Start
@@ -256,6 +261,7 @@ You can also configure via environment variables:
 | `OPENCODE_USER_AGENT` | Override the default UA used by `opencode` mode |
 | `OPENCLAW_USER_AGENT` | Override the compatibility UA used by `openclaw` mode |
 | `CUSTOM_USER_AGENT` | Override User-Agent directly |
+| `REMOVE_VERSION_PATH` | Remove version prefix (e.g., `/v1`) from request path when forwarding (true/false) |
 
 ### ⚠️ Risk Warning
 
@@ -317,22 +323,22 @@ This project is provided for **educational and research purposes only**.
 
 ```bash
 # Linux amd64
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.0/mask-ctl-linux-amd64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.1/mask-ctl-linux-amd64
 chmod +x mask-ctl-linux-amd64
 sudo mv mask-ctl-linux-amd64 /usr/local/bin/mask-ctl
 
 # Linux arm64
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.0/mask-ctl-linux-arm64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.1/mask-ctl-linux-arm64
 chmod +x mask-ctl-linux-arm64
 sudo mv mask-ctl-linux-arm64 /usr/local/bin/mask-ctl
 
 # macOS amd64
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.0/mask-ctl-darwin-amd64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.1/mask-ctl-darwin-amd64
 chmod +x mask-ctl-darwin-amd64
 sudo mv mask-ctl-darwin-amd64 /usr/local/bin/mask-ctl
 
 # macOS arm64
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.0/mask-ctl-darwin-arm64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.1/mask-ctl-darwin-arm64
 chmod +x mask-ctl-darwin-arm64
 sudo mv mask-ctl-darwin-arm64 /usr/local/bin/mask-ctl
 ```
@@ -388,6 +394,11 @@ use_coding_endpoint = true
 disguise_tool = "claudecode"        # 伪装为 Claude Code 风格 CLI 请求
 claude_code_user_agent = "claude-cli/2.1.76 (external, cli)"
 openclaw_user_agent = "OpenClaw-Gateway/1.0"
+
+[api]
+# 可选：转发时移除请求路径中的版本前缀（如 /v1）
+# 例如：请求 /v1/models 时，转发时只拼接 /models 部分
+remove_version_path = false
 ```
 
 #### 4. 启动
@@ -484,6 +495,7 @@ curl http://127.0.0.1:8787/stats
 | `OPENCODE_USER_AGENT` | 覆盖 `opencode` 模式默认 User-Agent |
 | `OPENCLAW_USER_AGENT` | 覆盖 `openclaw` 模式兼容默认 User-Agent |
 | `CUSTOM_USER_AGENT` | 直接覆盖 User-Agent |
+| `REMOVE_VERSION_PATH` | 转发时移除请求路径中的版本前缀（如 `/v1`）(true/false) |
 
 ### ⚠️ 风险预警
 

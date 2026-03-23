@@ -82,10 +82,87 @@ func TestBuildHeadersPreservesExistingXAppHeader(t *testing.T) {
 func TestBuildTargetURLPreservesPathAndQuery(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/chat/completions?foo=bar", nil)
 
-	got := buildTargetURL("https://example.com/api/coding/paas/v4", req)
+	got := buildTargetURL("https://example.com/api/coding/paas/v4", req, false)
 	want := "https://example.com/api/coding/paas/v4/chat/completions?foo=bar"
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
+func TestBuildTargetURLWithRemoveVersionPath(t *testing.T) {
+	tests := []struct {
+		name              string
+		baseURL           string
+		requestPath       string
+		removeVersionPath bool
+		want              string
+	}{
+		{
+			name:              "remove v1 prefix",
+			baseURL:           "https://api.example.com",
+			requestPath:       "/v1/models",
+			removeVersionPath: true,
+			want:              "https://api.example.com/models",
+		},
+		{
+			name:              "remove v1 prefix with longer path",
+			baseURL:           "https://api.example.com",
+			requestPath:       "/v1/chat/completions",
+			removeVersionPath: true,
+			want:              "https://api.example.com/chat/completions",
+		},
+		{
+			name:              "do not remove when disabled",
+			baseURL:           "https://api.example.com",
+			requestPath:       "/v1/models",
+			removeVersionPath: false,
+			want:              "https://api.example.com/v1/models",
+		},
+		{
+			name:              "remove v2 prefix",
+			baseURL:           "https://api.example.com",
+			requestPath:       "/v2/assistants",
+			removeVersionPath: true,
+			want:              "https://api.example.com/assistants",
+		},
+		{
+			name:              "path without version prefix unchanged",
+			baseURL:           "https://api.example.com",
+			requestPath:       "/models",
+			removeVersionPath: true,
+			want:              "https://api.example.com/models",
+		},
+		{
+			name:              "preserve query params",
+			baseURL:           "https://api.example.com",
+			requestPath:       "/v1/models?limit=10",
+			removeVersionPath: true,
+			want:              "https://api.example.com/models?limit=10",
+		},
+		{
+			name:              "only version path becomes empty",
+			baseURL:           "https://api.example.com",
+			requestPath:       "/v1",
+			removeVersionPath: true,
+			want:              "https://api.example.com",
+		},
+		{
+			name:              "remove v1beta prefix",
+			baseURL:           "https://api.example.com",
+			requestPath:       "/v1beta/files",
+			removeVersionPath: true,
+			want:              "https://api.example.com/files",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tt.requestPath, nil)
+			got := buildTargetURL(tt.baseURL, req, tt.removeVersionPath)
+			if got != tt.want {
+				t.Fatalf("expected %q, got %q", tt.want, got)
+			}
+		})
 	}
 }
 

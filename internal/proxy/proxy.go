@@ -114,7 +114,7 @@ func (p *Proxy) Forward(w http.ResponseWriter, r *http.Request) {
 	if !p.cfg.UseCodingEndpoint {
 		baseURL = provider.GeneralBaseURL
 	}
-	targetURL := buildTargetURL(baseURL, r)
+	targetURL := buildTargetURL(baseURL, r, p.cfg.RemoveVersionPath)
 
 	// 构建请求头
 	headers := p.buildHeaders(provider, codingAPIKey, r.Header)
@@ -417,15 +417,45 @@ func isEventStream(contentType string) bool {
 	return strings.Contains(strings.ToLower(contentType), "text/event-stream")
 }
 
-func buildTargetURL(baseURL string, r *http.Request) string {
+func buildTargetURL(baseURL string, r *http.Request, removeVersionPath bool) string {
 	targetURL := strings.TrimRight(baseURL, "/")
 	if r.URL.Path != "" {
-		targetURL += "/" + strings.TrimLeft(r.URL.Path, "/")
+		path := r.URL.Path
+		// 如果启用了移除版本路径，则移除 /v1, /v2 等版本前缀
+		if removeVersionPath {
+			path = removeVersionPrefix(path)
+		}
+		if path != "" {
+			targetURL += "/" + strings.TrimLeft(path, "/")
+		}
 	}
 	if r.URL.RawQuery != "" {
 		targetURL += "?" + r.URL.RawQuery
 	}
 	return targetURL
+}
+
+// removeVersionPrefix 移除路径中的版本前缀（如 /v1, /v2 等）
+func removeVersionPrefix(path string) string {
+	// 匹配 /v1, /v2, /v1beta, /v2alpha 等版本前缀
+	// 正则匹配：/v 后面跟数字，可选跟 alpha/beta/rc 等
+	path = strings.TrimLeft(path, "/")
+
+	// 常见版本前缀模式
+	versionPatterns := []string{"v1/", "v2/", "v3/", "v1beta/", "v1alpha/", "v2beta/", "v2alpha/"}
+
+	for _, pattern := range versionPatterns {
+		if strings.HasPrefix(path, pattern) {
+			return strings.TrimPrefix(path, pattern)
+		}
+	}
+
+	// 如果是单纯的版本路径如 /v1 或 /v2（没有后续路径），返回空
+	if path == "v1" || path == "v2" || path == "v3" {
+		return ""
+	}
+
+	return path
 }
 
 func isHopByHopHeader(key string) bool {

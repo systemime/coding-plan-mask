@@ -6,7 +6,7 @@
 
 [![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://golang.org/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.7.2-green.svg)](https://github.com/systemime/coding-plan-mask)
+[![Version](https://img.shields.io/badge/version-0.8.0-green.svg)](https://github.com/systemime/coding-plan-mask)
 
 *Use your Coding Plan subscription with ANY OpenAI-compatible coding tool*
 
@@ -67,22 +67,22 @@ Download the binary for your platform from [GitHub Releases](https://github.com/
 
 ```bash
 # Linux amd64
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.2/mask-ctl-linux-amd64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.0/mask-ctl-linux-amd64
 chmod +x mask-ctl-linux-amd64
 sudo mv mask-ctl-linux-amd64 /usr/local/bin/mask-ctl
 
 # Linux arm64
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.2/mask-ctl-linux-arm64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.0/mask-ctl-linux-arm64
 chmod +x mask-ctl-linux-arm64
 sudo mv mask-ctl-linux-arm64 /usr/local/bin/mask-ctl
 
 # macOS (Darwin amd64)
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.2/mask-ctl-darwin-amd64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.0/mask-ctl-darwin-amd64
 chmod +x mask-ctl-darwin-amd64
 sudo mv mask-ctl-darwin-amd64 /usr/local/bin/mask-ctl
 
 # macOS (Darwin arm64)
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.2/mask-ctl-darwin-arm64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.0/mask-ctl-darwin-arm64
 chmod +x mask-ctl-darwin-arm64
 sudo mv mask-ctl-darwin-arm64 /usr/local/bin/mask-ctl
 
@@ -170,18 +170,6 @@ If your client hardcodes `/v1`, that still works. The proxy keeps local manageme
 
 In non-debug mode, startup keeps the banner output and proxy activity is shown in a human-friendly text format instead of structured JSON logs.
 
-### 🤖 Supported Providers
-
-| Provider | Identifier | Models |
-|----------|------------|--------|
-| **Zhipu GLM** | `zhipu` | glm-4-flash, glm-4-plus, glm-4-air, glm-4-long |
-| **Zhipu GLM v2** | `zhipu_v2` | glm-4-flash, glm-4-plus, glm-4-air, glm-4-long, glm-4.7, glm-5 |
-| **Alibaba Cloud** | `aliyun` | qwen-turbo, qwen-plus, qwen-max, qwen2.5-coder-32b-instruct |
-| **MiniMax** | `minimax` | abab6.5s-chat, abab6.5g-chat, abab6.5-chat |
-| **DeepSeek** | `deepseek` | deepseek-chat, deepseek-coder |
-| **Moonshot** | `moonshot` | moonshot-v1-8k, moonshot-v1-32k, moonshot-v1-128k |
-| **Custom** | `custom` | Use `[api]` section to configure custom URLs |
-
 ### 🎭 Tool Masking Options
 
 ```toml
@@ -231,12 +219,23 @@ mask-ctl info
 # View token usage statistics
 mask-ctl stats
 
+# View forwarding history (interactive TUI)
+mask-ctl history
+
 # View help
 mask-ctl help
 
 # View usage statistics via API
 curl http://127.0.0.1:8787/stats
 ```
+
+#### History Command
+
+The `history` command provides an interactive terminal UI for browsing forwarding records:
+
+- **Navigation**: Use `↑/↓` or `j/k` to move through records
+- **View Details**: Press `Enter` to expand full request/response details including body
+- **Exit**: Press `q` to quit, `Esc` to return from detail view
 
 ### 🔧 Environment Variables
 
@@ -318,22 +317,22 @@ This project is provided for **educational and research purposes only**.
 
 ```bash
 # Linux amd64
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.2/mask-ctl-linux-amd64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.0/mask-ctl-linux-amd64
 chmod +x mask-ctl-linux-amd64
 sudo mv mask-ctl-linux-amd64 /usr/local/bin/mask-ctl
 
 # Linux arm64
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.2/mask-ctl-linux-arm64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.0/mask-ctl-linux-arm64
 chmod +x mask-ctl-linux-arm64
 sudo mv mask-ctl-linux-arm64 /usr/local/bin/mask-ctl
 
 # macOS amd64
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.2/mask-ctl-darwin-amd64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.0/mask-ctl-darwin-amd64
 chmod +x mask-ctl-darwin-amd64
 sudo mv mask-ctl-darwin-amd64 /usr/local/bin/mask-ctl
 
 # macOS arm64
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.7.2/mask-ctl-darwin-arm64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.0/mask-ctl-darwin-arm64
 chmod +x mask-ctl-darwin-arm64
 sudo mv mask-ctl-darwin-arm64 /usr/local/bin/mask-ctl
 ```
@@ -415,18 +414,6 @@ sudo systemctl start coding-plan-mask
 
 在非 `debug` 模式下，程序会保留启动横幅，并以人类可读的文本格式输出代理 token 日志，而不是结构化 JSON 日志。
 
-### 🤖 支持的供应商
-
-| 供应商 | 标识符 | 支持模型 |
-|--------|--------|----------|
-| **智谱 GLM** | `zhipu` | glm-4-flash, glm-4-plus, glm-4-air, glm-4-long |
-| **智谱 GLM v2** | `zhipu_v2` | glm-4-flash, glm-4-plus, glm-4-air, glm-4-long, glm-4.7, glm-5 |
-| **阿里云百炼** | `aliyun` | qwen-turbo, qwen-plus, qwen-max, qwen2.5-coder-32b-instruct |
-| **MiniMax** | `minimax` | abab6.5s-chat, abab6.5g-chat, abab6.5-chat |
-| **DeepSeek** | `deepseek` | deepseek-chat, deepseek-coder |
-| **Moonshot (Kimi)** | `moonshot` | moonshot-v1-8k, moonshot-v1-32k, moonshot-v1-128k |
-| **自定义** | `custom` | 使用 `[api]` 配置段自定义 URL |
-
 ### 🎭 工具伪装选项
 
 | 工具 | 标识符 | User-Agent | 说明 |
@@ -462,12 +449,23 @@ mask-ctl info
 # 查看 Token 使用统计
 mask-ctl stats
 
+# 查看转发历史（交互式 TUI）
+mask-ctl history
+
 # 查看帮助
 mask-ctl help
 
 # 通过 API 查看使用统计
 curl http://127.0.0.1:8787/stats
 ```
+
+#### History 命令
+
+`history` 命令提供交互式终端界面浏览转发记录：
+
+- **导航**：使用 `↑/↓` 或 `j/k` 在记录间移动
+- **查看详情**：按 `Enter` 展开完整的请求/响应详情，包括 body
+- **退出**：按 `q` 退出，`Esc` 从详情视图返回
 
 ### 🔧 环境变量配置
 

@@ -14,12 +14,17 @@ import (
 	"coding-plan-mask/internal/server"
 	"coding-plan-mask/internal/storage"
 
+	"github.com/charmbracelet/bubbles/help"
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
 var (
-	version = "0.7.2"
+	version = "0.8.0"
 	commit  = "unknown"
 	date    = "unknown"
 )
@@ -44,6 +49,9 @@ func main() {
 			return
 		case "stats":
 			showStats(os.Args[2:])
+			return
+		case "history":
+			showHistory(os.Args[2:])
 			return
 		case "help", "-h", "--help":
 			printHelp()
@@ -246,10 +254,12 @@ func printHelp() {
   %s show             显示本地连接信息
   %s show --json      JSON 格式输出连接信息
   %s stats            显示 Token 使用统计
+  %s history          查看转发历史记录
 
 子命令:
   show, info, connection    显示本地连接地址和 API Key
   stats                      显示 Token 使用统计
+  history                    交互式查看转发历史记录
 
 选项:
   -config string         配置文件路径
@@ -287,7 +297,10 @@ User-Agent 来源说明:
 
   # 显示统计
   %s stats
-`, version, os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0])
+
+  # 查看转发历史
+  %s history
+`, version, os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0])
 }
 
 // initLogger 初始化日志
@@ -385,4 +398,403 @@ func padRight(s string, length int) string {
 		return s[:length]
 	}
 	return s + strings.Repeat(" ", length-len(s))
+}
+
+// ========== History TUI ==========
+
+// history keybindings
+type historyKeyMap struct {
+	Up       key.Binding
+	Down     key.Binding
+	Enter    key.Binding
+	Esc      key.Binding
+	Quit     key.Binding
+	Help     key.Binding
+}
+
+var historyKeys = historyKeyMap{
+	Up: key.NewBinding(
+		key.WithKeys("up", "k"),
+		key.WithHelp("↑/k", "上移"),
+	),
+	Down: key.NewBinding(
+		key.WithKeys("down", "j"),
+		key.WithHelp("↓/j", "下移"),
+	),
+	Enter: key.NewBinding(
+		key.WithKeys("enter"),
+		key.WithHelp("enter", "查看详情"),
+	),
+	Esc: key.NewBinding(
+		key.WithKeys("esc"),
+		key.WithHelp("esc", "返回列表"),
+	),
+	Quit: key.NewBinding(
+		key.WithKeys("q", "ctrl+c"),
+		key.WithHelp("q", "退出"),
+	),
+	Help: key.NewBinding(
+		key.WithKeys("?"),
+		key.WithHelp("?", "帮助"),
+	),
+}
+
+func (k historyKeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{k.Up, k.Down, k.Enter, k.Esc, k.Quit}
+}
+
+func (k historyKeyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{k.Up, k.Down},
+		{k.Enter, k.Esc},
+		{k.Quit, k.Help},
+	}
+}
+
+// historyModel TUI model
+type historyModel struct {
+	records        []storage.RequestRecordLite
+	selected       int
+	store          *storage.Storage
+	viewMode       bool          // 是否在详情查看模式
+	detailRecord   *storage.RequestRecord
+	viewport       viewport.Model
+	help           help.Model
+	showHelp       bool
+	ready          bool
+	width, height  int
+	err            error
+}
+
+func newHistoryModel(records []storage.RequestRecordLite, store *storage.Storage) historyModel {
+	return historyModel{
+		records:  records,
+		store:    store,
+		help:     help.New(),
+		showHelp: false,
+	}
+}
+
+func (m historyModel) Init() tea.Cmd {
+	return nil
+}
+
+func (m historyModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		m.help.Width = msg.Width
+		m.ready = true
+		if m.viewMode {
+			m.viewport.Width = msg.Width - 4
+			m.viewport.Height = msg.Height - 6
+		}
+		return m, nil
+
+	case tea.KeyMsg:
+		if m.viewMode {
+			// 详情模式
+			switch {
+			case key.Matches(msg, historyKeys.Esc):
+				m.viewMode = false
+				m.detailRecord = nil
+				return m, nil
+			case key.Matches(msg, historyKeys.Quit):
+				return m, tea.Quit
+			}
+			var cmd tea.Cmd
+			m.viewport, cmd = m.viewport.Update(msg)
+			return m, cmd
+		}
+
+		// 列表模式
+		switch {
+		case key.Matches(msg, historyKeys.Quit):
+			return m, tea.Quit
+		case key.Matches(msg, historyKeys.Up):
+			if m.selected > 0 {
+				m.selected--
+			}
+		case key.Matches(msg, historyKeys.Down):
+			if m.selected < len(m.records)-1 {
+				m.selected++
+			}
+		case key.Matches(msg, historyKeys.Enter):
+			if len(m.records) > 0 && m.selected < len(m.records) {
+				record := m.records[m.selected]
+				detail, err := m.store.GetRequestDetail(record.ID)
+				if err != nil {
+					m.err = err
+					return m, nil
+				}
+				m.detailRecord = detail
+				m.viewMode = true
+				content := formatDetailContent(detail)
+				m.viewport = viewport.New(m.width-4, m.height-6)
+				m.viewport.SetContent(content)
+			}
+		case key.Matches(msg, historyKeys.Help):
+			m.showHelp = !m.showHelp
+		}
+	}
+
+	return m, tea.Batch(cmds...)
+}
+
+var (
+	titleStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("15")).
+			Background(lipgloss.Color("62")).
+			Padding(0, 1)
+
+	selectedStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("15")).
+			Background(lipgloss.Color("62"))
+
+	normalStyle = lipgloss.NewStyle()
+
+	headerStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("86"))
+
+	detailStyle = lipgloss.NewStyle().
+			Padding(0, 1)
+)
+
+func (m historyModel) View() string {
+	if !m.ready {
+		return "加载中..."
+	}
+
+	if m.err != nil {
+		return fmt.Sprintf("错误: %v", m.err)
+	}
+
+	if m.viewMode && m.detailRecord != nil {
+		// 详情模式
+		title := titleStyle.Render(fmt.Sprintf(" 请求详情 #%d ", m.detailRecord.ID))
+		helpBar := lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("按 Esc 返回列表 | q 退出")
+		return fmt.Sprintf("%s\n%s\n\n%s", title, m.viewport.View(), helpBar)
+	}
+
+	// 列表模式
+	var b strings.Builder
+
+	// 标题
+	title := titleStyle.Render(" 转发历史记录 ")
+	b.WriteString(title + "\n\n")
+
+	// 表头
+	header := fmt.Sprintf("  %-6s %-20s %-18s %-12s %-30s %-10s",
+		"ID", "时间", "模型", "供应商", "路径", "状态")
+	b.WriteString(headerStyle.Render(header) + "\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("238")).Render(strings.Repeat("─", min(m.width, 120))) + "\n")
+
+	// 计算可见区域
+	visibleStart := max(0, m.selected-10)
+	visibleEnd := min(len(m.records), visibleStart+20)
+
+	for i := visibleStart; i < visibleEnd; i++ {
+		r := m.records[i]
+		timeStr := r.Timestamp.Format("2006-01-02 15:04:05")
+		model := truncate(r.Model, 16)
+		provider := truncate(r.Provider, 10)
+		path := truncate(r.Path, 28)
+
+		line := fmt.Sprintf("  %-6d %-20s %-18s %-12s %-30s %-10d",
+			r.ID, timeStr, model, provider, path, r.StatusCode)
+
+		if i == m.selected {
+			b.WriteString(selectedStyle.Render(line) + "\n")
+		} else {
+			b.WriteString(normalStyle.Render(line) + "\n")
+		}
+	}
+
+	// 底部状态
+	if len(m.records) == 0 {
+		b.WriteString("\n  暂无历史记录\n")
+	} else {
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("238")).Render(strings.Repeat("─", min(m.width, 120))) + "\n")
+		status := fmt.Sprintf(" %d/%d 条记录 | ↑/↓ 移动 | Enter 查看详情 | q 退出 ",
+			m.selected+1, len(m.records))
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(status))
+	}
+
+	return b.String()
+}
+
+func formatDetailContent(r *storage.RequestRecord) string {
+	var b strings.Builder
+
+	b.WriteString(lipgloss.NewStyle().Bold(true).Render("═══════════════════════════════════════════════════════════════") + "\n\n")
+
+	// 基本信息
+	b.WriteString(fmt.Sprintf("  ID:          %d\n", r.ID))
+	b.WriteString(fmt.Sprintf("  时间:        %s\n", r.Timestamp.Format("2006-01-02 15:04:05.000")))
+	b.WriteString(fmt.Sprintf("  供应商:      %s\n", r.Provider))
+	b.WriteString(fmt.Sprintf("  模型:        %s\n", r.Model))
+	b.WriteString(fmt.Sprintf("  方法:        %s\n", r.Method))
+	b.WriteString(fmt.Sprintf("  路径:        %s\n", r.Path))
+	b.WriteString(fmt.Sprintf("  客户端IP:    %s\n", r.ClientIP))
+	b.WriteString(fmt.Sprintf("  状态码:      %d\n", r.StatusCode))
+	b.WriteString(fmt.Sprintf("  耗时:        %.2f ms\n", r.Duration))
+	b.WriteString(fmt.Sprintf("  输入Token:   %d\n", r.InputTokens))
+	b.WriteString(fmt.Sprintf("  输出Token:   %d\n", r.OutputTokens))
+	b.WriteString(fmt.Sprintf("  总Token:     %d\n", r.TotalTokens))
+	b.WriteString(fmt.Sprintf("  流式:        %v\n", r.Stream))
+	b.WriteString(fmt.Sprintf("  成功:        %v\n", r.Success))
+	if r.ErrorMsg != "" {
+		b.WriteString(fmt.Sprintf("  错误信息:    %s\n", r.ErrorMsg))
+	}
+
+	b.WriteString("\n" + lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("86")).Render("── 请求Body ──") + "\n\n")
+	if r.RequestBody != "" {
+		b.WriteString(indentJSON(r.RequestBody))
+	} else {
+		b.WriteString("  (空)\n")
+	}
+
+	b.WriteString("\n" + lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("86")).Render("── 响应Body ──") + "\n\n")
+	if r.ResponseBody != "" {
+		b.WriteString(indentJSON(r.ResponseBody))
+	} else {
+		b.WriteString("  (空)\n")
+	}
+
+	b.WriteString("\n" + lipgloss.NewStyle().Bold(true).Render("═══════════════════════════════════════════════════════════════") + "\n")
+
+	return b.String()
+}
+
+func indentJSON(s string) string {
+	var buf strings.Builder
+	indent := 0
+	inString := false
+	escaped := false
+
+	for _, c := range s {
+		if escaped {
+			buf.WriteRune(c)
+			escaped = false
+			continue
+		}
+
+		switch c {
+		case '\\':
+			buf.WriteRune(c)
+			escaped = true
+		case '"':
+			buf.WriteRune(c)
+			inString = !inString
+		case '{', '[':
+			buf.WriteRune(c)
+			if !inString {
+				buf.WriteRune('\n')
+				indent++
+				buf.WriteString(strings.Repeat("  ", indent))
+			}
+		case '}', ']':
+			if !inString {
+				buf.WriteRune('\n')
+				indent--
+				buf.WriteString(strings.Repeat("  ", indent))
+			}
+			buf.WriteRune(c)
+		case ',':
+			buf.WriteRune(c)
+			if !inString {
+				buf.WriteRune('\n')
+				buf.WriteString(strings.Repeat("  ", indent))
+			}
+		case ':':
+			buf.WriteRune(c)
+			if !inString {
+				buf.WriteRune(' ')
+			}
+		case ' ', '\t', '\n', '\r':
+			if inString {
+				buf.WriteRune(c)
+			}
+		default:
+			buf.WriteRune(c)
+		}
+	}
+
+	return "  " + strings.ReplaceAll(buf.String(), "\n", "\n  ")
+}
+
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-3] + "..."
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// showHistory 显示历史记录
+func showHistory(args []string) {
+	fs := flag.NewFlagSet("history", flag.ExitOnError)
+	configPath := fs.String("config", "", "配置文件路径")
+	_ = fs.Parse(args)
+
+	// 确定数据目录
+	var dataDir string
+	if *configPath != "" {
+		dataDir = filepath.Join(filepath.Dir(*configPath), "data")
+	} else {
+		dataDir = filepath.Join(getExecutableDir(), "data")
+	}
+	dbPath := filepath.Join(dataDir, "proxy.db")
+
+	// 检查数据库是否存在
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		fmt.Println("历史数据库不存在，服务可能还未运行过")
+		return
+	}
+
+	// 打开存储
+	store, err := storage.New(dataDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "打开存储失败: %v\n", err)
+		os.Exit(1)
+	}
+	defer store.Close()
+
+	// 获取所有记录
+	records, err := store.GetAllRequestsLite()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "获取历史记录失败: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(records) == 0 {
+		fmt.Println("\n暂无历史记录")
+		return
+	}
+
+	// 启动TUI
+	m := newHistoryModel(records, store)
+	p := tea.NewProgram(m, tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "启动TUI失败: %v\n", err)
+		os.Exit(1)
+	}
 }

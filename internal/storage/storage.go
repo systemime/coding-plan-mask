@@ -307,6 +307,39 @@ func (s *Storage) GetRecentRequests(limit int) ([]RequestRecord, error) {
 	return records, nil
 }
 
+// GetAllRequestsLite 获取所有请求记录（轻量版，用于历史列表）
+func (s *Storage) GetAllRequestsLite() ([]RequestRecordLite, error) {
+	rows, err := s.db.Query(`
+		SELECT id, timestamp, provider, model, stream, method, path, client_ip,
+		       status_code, duration_ms, input_tokens, output_tokens, total_tokens, success
+		FROM requests
+		ORDER BY timestamp DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var records []RequestRecordLite
+	for rows.Next() {
+		var r RequestRecordLite
+		var stream int
+		var success int
+		err := rows.Scan(
+			&r.ID, &r.Timestamp, &r.Provider, &r.Model, &stream, &r.Method, &r.Path, &r.ClientIP,
+			&r.StatusCode, &r.Duration, &r.InputTokens, &r.OutputTokens, &r.TotalTokens, &success,
+		)
+		if err != nil {
+			continue
+		}
+		r.Stream = stream == 1
+		r.Success = success == 1
+		records = append(records, r)
+	}
+
+	return records, nil
+}
+
 // GetRequestDetail 获取请求详情
 func (s *Storage) GetRequestDetail(id int64) (*RequestRecord, error) {
 	var r RequestRecord

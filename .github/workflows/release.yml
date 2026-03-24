@@ -1,0 +1,159 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., 0.8.4)'
+        required: false
+        default: ''
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}-${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+            goos: linux
+            goarch: amd64
+          - os: linux
+            arch: arm64
+            goos: linux
+            goarch: arm64
+          - os: darwin
+            arch: amd64
+            goos: darwin
+            goarch: amd64
+          - os: darwin
+            arch: arm64
+            goos: darwin
+            goarch: arm64
+          - os: windows
+            arch: amd64
+            goos: windows
+            goarch: amd64
+            ext: .exe
+          - os: windows
+            arch: arm64
+            goos: windows
+            goarch: arm64
+            ext: .exe
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=$(cat Makefile | grep 'VERSION :=' | head -1 | cut -d'=' -f2 | tr -d ' ')" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          BUILD_TIME=$(date -u '+%Y-%m-%d_%H:%M:%S')
+          GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+          LDFLAGS="-s -w -X main.version=${VERSION} -X main.commit=${GIT_COMMIT} -X main.date=${BUILD_TIME}"
+
+          BINARY_NAME="mask-ctl-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}"
+          mkdir -p build/bin
+          go build -ldflags "${LDFLAGS}" -o build/bin/${BINARY_NAME} ./cmd/coding-plan-mask
+
+          echo "BINARY_NAME=${BINARY_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mask-ctl-${{ matrix.os }}-${{ matrix.arch }}
+          path: build/bin/mask-ctl-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}
+          retention-days: 1
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=$(cat Makefile | grep 'VERSION :=' | head -1 | cut -d'=' -f2 | tr -d ' ')" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: build/bin
+
+      - name: List artifacts
+        run: ls -la build/bin/
+
+      - name: Create SHA256 checksums
+        run: |
+          cd build/bin
+          for dir in */; do
+            cd "$dir"
+            for f in *; do
+              sha256sum "$f" >> ../../checksums.sha256
+            done
+            cd ..
+          done
+          cat checksums.sha256
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.VERSION }}
+          name: Release v${{ steps.version.outputs.VERSION }}
+          body: |
+            ## Changes
+            - Add Anthropic format compatibility mode (`use_anthropic` config)
+            - Add terminal logging for mock models requests
+            - Fix null values in JSON Schema for Anthropic protocol
+
+            ## Downloads
+            | Platform | Architecture | File |
+            |----------|-------------|------|
+            | Linux | amd64 | mask-ctl-linux-amd64 |
+            | Linux | arm64 | mask-ctl-linux-arm64 |
+            | macOS | amd64 | mask-ctl-darwin-amd64 |
+            | macOS | arm64 | mask-ctl-darwin-arm64 |
+            | Windows | amd64 | mask-ctl-windows-amd64.exe |
+            | Windows | arm64 | mask-ctl-windows-arm64.exe |
+          files: |
+            build/bin/*/mask-ctl-*
+            checksums.sha256
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

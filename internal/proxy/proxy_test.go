@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -77,6 +78,92 @@ func TestBuildHeadersPreservesExistingXAppHeader(t *testing.T) {
 	headers := p.buildHeaders(provider, "test-key", requestHeaders)
 	if got := headers.Get("X-App"); got != "custom-cli" {
 		t.Fatalf("expected existing X-App header to be preserved, got %q", got)
+	}
+}
+
+func TestBuildHeadersAddsSessionIdAndClientRequestIdForClaudeCode(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.DisguiseTool = "claudecode"
+
+	p := &Proxy{cfg: cfg}
+	provider := &config.ProviderConfig{
+		AuthHeader:   "Authorization",
+		AuthPrefix:   "Bearer ",
+		ExtraHeaders: map[string]string{},
+	}
+
+	requestHeaders := http.Header{
+		"Authorization": []string{"Bearer local-key"},
+	}
+
+	headers := p.buildHeaders(provider, "test-key", requestHeaders)
+
+	sessionID := headers.Get("X-Claude-Code-Session-Id")
+	if sessionID == "" {
+		t.Fatal("expected X-Claude-Code-Session-Id to be set for claudecode mode")
+	}
+	if len(sessionID) != 36 {
+		t.Fatalf("expected UUID format for session ID, got %q", sessionID)
+	}
+
+	clientReqID := headers.Get("x-client-request-id")
+	if clientReqID == "" {
+		t.Fatal("expected x-client-request-id to be set for claudecode mode")
+	}
+	if len(clientReqID) != 36 {
+		t.Fatalf("expected UUID format for client request ID, got %q", clientReqID)
+	}
+}
+
+func TestBuildHeadersPreservesExistingSessionAndClientRequestId(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.DisguiseTool = "claudecode"
+
+	p := &Proxy{cfg: cfg}
+	provider := &config.ProviderConfig{
+		AuthHeader:   "Authorization",
+		AuthPrefix:   "Bearer ",
+		ExtraHeaders: map[string]string{},
+	}
+
+	requestHeaders := http.Header{
+		"Authorization":            []string{"Bearer local-key"},
+		"X-Claude-Code-Session-Id": []string{"custom-session-id"},
+		"x-client-request-id":      []string{"custom-client-req-id"},
+	}
+
+	headers := p.buildHeaders(provider, "test-key", requestHeaders)
+
+	if got := headers.Get("X-Claude-Code-Session-Id"); got != "custom-session-id" {
+		t.Fatalf("expected existing X-Claude-Code-Session-Id to be preserved, got %q", got)
+	}
+	if got := headers.Get("x-client-request-id"); got != "custom-client-req-id" {
+		t.Fatalf("expected existing x-client-request-id to be preserved, got %q", got)
+	}
+}
+
+func TestBuildHeadersNoExtraHeadersForNonClaudeCode(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.DisguiseTool = "openclaw"
+
+	p := &Proxy{cfg: cfg}
+	provider := &config.ProviderConfig{
+		AuthHeader:   "Authorization",
+		AuthPrefix:   "Bearer ",
+		ExtraHeaders: map[string]string{},
+	}
+
+	requestHeaders := http.Header{
+		"Authorization": []string{"Bearer local-key"},
+	}
+
+	headers := p.buildHeaders(provider, "test-key", requestHeaders)
+
+	if headers.Get("X-Claude-Code-Session-Id") != "" {
+		t.Fatal("expected no X-Claude-Code-Session-Id for non-claudecode mode")
+	}
+	if headers.Get("x-client-request-id") != "" {
+		t.Fatal("expected no x-client-request-id for non-claudecode mode")
 	}
 }
 
@@ -553,5 +640,106 @@ func TestFixAnthropicSchema(t *testing.T) {
 				t.Fatalf("expected %v, got %v", tt.expected, result)
 			}
 		})
+	}
+}
+
+func TestInjectBillingHeaderWithStringSystem(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.DisguiseTool = "claudecode"
+
+	p := &Proxy{cfg: cfg}
+	reqBody := map[string]interface{}{
+		"system": "You are a helpful assistant.",
+		"model":  "gpt-4",
+	}
+
+	body, _ := json.Marshal(reqBody)
+	newBody := p.injectBillingHeader(body, reqBody)
+
+	var result map[string]interface{}
+	json.Unmarshal(newBody, &result)
+
+	sys, _ := result["system"].(string)
+	if !strings.HasPrefix(sys, "x-anthropic-billing-header:") {
+		t.Fatalf("expected system to start with billing header, got %q", sys[:80])
+	}
+	if !strings.Contains(sys, "cc_version=") {
+		t.Fatal("expected cc_version in billing header")
+	}
+	if !strings.Contains(sys, "cc_entrypoint=cli;") {
+		t.Fatal("expected cc_entrypoint=cli in billing header")
+	}
+	if !strings.Contains(sys, "You are a helpful assistant.") {
+		t.Fatal("expected original system content to be preserved")
+	}
+}
+
+func TestInjectBillingHeaderWithArraySystem(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.DisguiseTool = "claudecode"
+
+	p := &Proxy{cfg: cfg}
+	reqBody := map[string]interface{}{
+		"system": []interface{}{
+			map[string]interface{}{"type": "text", "text": "Hello"},
+		},
+	}
+
+	body, _ := json.Marshal(reqBody)
+	newBody := p.injectBillingHeader(body, reqBody)
+
+	var result map[string]interface{}
+	json.Unmarshal(newBody, &result)
+
+	sysArr, ok := result["system"].([]interface{})
+	if !ok {
+		t.Fatal("expected system to remain an array")
+	}
+	if len(sysArr) != 2 {
+		t.Fatalf("expected system array to have 2 elements, got %d", len(sysArr))
+	}
+	first, _ := sysArr[0].(string)
+	if !strings.HasPrefix(first, "x-anthropic-billing-header:") {
+		t.Fatalf("expected first element to be billing header, got %q", first)
+	}
+}
+
+func TestInjectBillingHeaderWithSystemPrompt(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.DisguiseTool = "claudecode"
+
+	p := &Proxy{cfg: cfg}
+	reqBody := map[string]interface{}{
+		"system_prompt": "You are a helpful assistant.",
+		"model":         "gpt-4",
+	}
+
+	body, _ := json.Marshal(reqBody)
+	newBody := p.injectBillingHeader(body, reqBody)
+
+	var result map[string]interface{}
+	json.Unmarshal(newBody, &result)
+
+	sysPrompt, _ := result["system_prompt"].(string)
+	if !strings.HasPrefix(sysPrompt, "x-anthropic-billing-header:") {
+		t.Fatalf("expected system_prompt to start with billing header, got %q", sysPrompt[:80])
+	}
+}
+
+func TestInjectBillingHeaderNoSystemField(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.DisguiseTool = "claudecode"
+
+	p := &Proxy{cfg: cfg}
+	reqBody := map[string]interface{}{
+		"model": "gpt-4",
+	}
+
+	body, _ := json.Marshal(reqBody)
+	newBody := p.injectBillingHeader(body, reqBody)
+
+	// 没有 system 字段，body 应保持不变
+	if string(newBody) != string(body) {
+		t.Fatal("expected body to remain unchanged when no system field exists")
 	}
 }

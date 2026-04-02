@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -41,6 +42,59 @@ func TestGetDisguiseHeadersAddsXAppForClaudeCode(t *testing.T) {
 	headers := cfg.GetDisguiseHeaders()
 	if got := headers["X-App"]; got != ClaudeCodeAppHeaderValue {
 		t.Fatalf("expected X-App disguise header %q, got %q", ClaudeCodeAppHeaderValue, got)
+	}
+}
+
+func TestGetDisguiseHeadersAddsSessionIdForClaudeCode(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.DisguiseTool = "claudecode"
+
+	headers := cfg.GetDisguiseHeaders()
+	sessionID := headers["X-Claude-Code-Session-Id"]
+	if sessionID == "" {
+		t.Fatal("expected X-Claude-Code-Session-Id header to be set for claudecode mode")
+	}
+	if len(sessionID) != 36 {
+		t.Fatalf("expected UUID format (36 chars), got %q (%d chars)", sessionID, len(sessionID))
+	}
+}
+
+func TestGetDisguiseHeadersReturnsNilForNonClaudeCode(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.DisguiseTool = "openclaw"
+
+	headers := cfg.GetDisguiseHeaders()
+	if headers != nil {
+		t.Fatalf("expected nil headers for openclaw, got %v", headers)
+	}
+}
+
+func TestGetBillingHeader(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.DisguiseTool = "claudecode"
+
+	header := cfg.GetBillingHeader()
+	if !strings.HasPrefix(header, "x-anthropic-billing-header: cc_version=") {
+		t.Fatalf("expected billing header prefix, got %q", header)
+	}
+	if !strings.Contains(header, "cc_entrypoint=cli;") {
+		t.Fatalf("expected cc_entrypoint=cli in billing header, got %q", header)
+	}
+	if !strings.Contains(header, ClaudeCodeVersion+".") {
+		t.Fatalf("expected version %s in billing header, got %q", ClaudeCodeVersion, header)
+	}
+}
+
+func TestGetClientRequestID(t *testing.T) {
+	cfg := DefaultConfig()
+	id1 := cfg.GetClientRequestID()
+	id2 := cfg.GetClientRequestID()
+
+	if id1 == id2 {
+		t.Fatal("expected different UUIDs for consecutive calls")
+	}
+	if len(id1) != 36 {
+		t.Fatalf("expected UUID format (36 chars), got %q", id1)
 	}
 }
 

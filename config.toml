@@ -41,7 +41,7 @@ use_coding_endpoint = true
 disguise_tool = "claudecode"
 # Claude Code 模式的默认 User-Agent
 # 默认值基于当前 Claude Code CLI 的真实请求格式
-claude_code_user_agent = "claude-cli/2.1.76 (external, cli)"
+claude_code_user_agent = "claude-cli/2.1.88 (external, cli)"
 # OpenClaw 模式的兼容默认 User-Agent
 # 该值用于兼容部分 OpenClaw 请求路径，可按需覆盖
 openclaw_user_agent = "OpenClaw-Gateway/1.0"
@@ -66,6 +66,10 @@ coding_url = ""
 auth_header = ""
 # 认证前缀 (留空使用默认 "Bearer ")
 auth_prefix = ""
+# Anthropic 格式兼容模式 (默认 false)
+# 启用后会修复请求体中的 schema 字段，将 null 转为正确的默认值
+# 适用于使用 Anthropic 原生协议的 API 供应商
+use_anthropic = true
 
 # ============================================================================
 # 服务商默认 URL 参考

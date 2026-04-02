@@ -2,6 +2,7 @@
 package config
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/BurntSushi/toml"
+	"github.com/google/uuid"
 )
 
 // ProviderConfig 服务商配置
@@ -123,10 +125,12 @@ type DisguiseToolConfig struct {
 }
 
 const (
-	DefaultClaudeCodeUserAgent = "claude-cli/2.1.76 (external, cli)"
+	DefaultClaudeCodeUserAgent = "claude-cli/2.1.88 (external, cli)"
 	DefaultOpenClawUserAgent   = "OpenClaw-Gateway/1.0"
 	DefaultOpenCodeUserAgent   = "opencode/1.2.27 ai-sdk/provider-utils/3.0.20 runtime/bun/1.3.10"
 	ClaudeCodeAppHeaderValue   = "cli"
+	// ClaudeCodeVersion 用于生成 x-anthropic-billing-header 中的 cc_version 字段
+	ClaudeCodeVersion = "2.1.88"
 )
 
 // DefaultMockModelsResp 默认的 /models 模拟响应
@@ -168,7 +172,7 @@ var PredefinedDisguiseTools = map[string]DisguiseToolConfig{
 	},
 }
 
-func normalizeDisguiseTool(tool string) string {
+func NormalizeDisguiseTool(tool string) string {
 	tool = strings.ToLower(strings.TrimSpace(tool))
 	if tool == "" {
 		return "claudecode"
@@ -300,7 +304,7 @@ func LoadConfig(path string) (*Config, error) {
 	cfg.ClaudeCodeUserAgent = strings.TrimSpace(cfgFile.Endpoint.ClaudeCodeUserAgent)
 	cfg.OpenClawUserAgent = strings.TrimSpace(cfgFile.Endpoint.OpenClawUserAgent)
 	cfg.OpenCodeUserAgent = strings.TrimSpace(cfgFile.Endpoint.OpenCodeUserAgent)
-	cfg.DisguiseTool = normalizeDisguiseTool(cfgFile.Endpoint.DisguiseTool)
+	cfg.DisguiseTool = NormalizeDisguiseTool(cfgFile.Endpoint.DisguiseTool)
 
 	// 自定义 API 配置
 	cfg.CustomBaseURL = cfgFile.API.BaseURL
@@ -344,7 +348,7 @@ func (c *Config) loadFromEnv() {
 		c.CustomCodingURL = v
 	}
 	if v := os.Getenv("DISGUISE_TOOL"); v != "" {
-		c.DisguiseTool = normalizeDisguiseTool(v)
+		c.DisguiseTool = NormalizeDisguiseTool(v)
 	}
 	if v := os.Getenv("CUSTOM_USER_AGENT"); v != "" {
 		c.CustomUserAgent = v
@@ -405,7 +409,7 @@ func (c *Config) Set(key string, value string) error {
 	case "opencode_user_agent":
 		c.OpenCodeUserAgent = strings.TrimSpace(value)
 	case "disguise_tool":
-		c.DisguiseTool = normalizeDisguiseTool(value)
+		c.DisguiseTool = NormalizeDisguiseTool(value)
 	case "api_base_url", "base_url":
 		c.CustomBaseURL = value
 	case "api_coding_url", "coding_url":
@@ -472,18 +476,18 @@ func (c *Config) GetEffectiveUserAgent() string {
 		return c.CustomUserAgent
 	}
 
-	if normalizeDisguiseTool(c.DisguiseTool) == "claudecode" && c.ClaudeCodeUserAgent != "" {
+	if NormalizeDisguiseTool(c.DisguiseTool) == "claudecode" && c.ClaudeCodeUserAgent != "" {
 		return c.ClaudeCodeUserAgent
 	}
-	if normalizeDisguiseTool(c.DisguiseTool) == "openclaw" && c.OpenClawUserAgent != "" {
+	if NormalizeDisguiseTool(c.DisguiseTool) == "openclaw" && c.OpenClawUserAgent != "" {
 		return c.OpenClawUserAgent
 	}
-	if normalizeDisguiseTool(c.DisguiseTool) == "opencode" && c.OpenCodeUserAgent != "" {
+	if NormalizeDisguiseTool(c.DisguiseTool) == "opencode" && c.OpenCodeUserAgent != "" {
 		return c.OpenCodeUserAgent
 	}
 
 	// 根据伪装工具选择
-	if tool, ok := PredefinedDisguiseTools[normalizeDisguiseTool(c.DisguiseTool)]; ok && tool.UserAgent != "" {
+	if tool, ok := PredefinedDisguiseTools[NormalizeDisguiseTool(c.DisguiseTool)]; ok && tool.UserAgent != "" {
 		return tool.UserAgent
 	}
 
@@ -496,14 +500,33 @@ func (c *Config) GetDisguiseHeaders() map[string]string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	switch normalizeDisguiseTool(c.DisguiseTool) {
+	switch NormalizeDisguiseTool(c.DisguiseTool) {
 	case "claudecode":
+		sessionID := uuid.New().String()
 		return map[string]string{
-			"X-App": ClaudeCodeAppHeaderValue,
+			"X-App":                    ClaudeCodeAppHeaderValue,
+			"X-Claude-Code-Session-Id": sessionID,
 		}
 	default:
 		return nil
 	}
+}
+
+// GetClientRequestID 生成一个随机的 x-client-request-id
+func (c *Config) GetClientRequestID() string {
+	return uuid.New().String()
+}
+
+// GetBillingHeader 生成 x-anthropic-billing-header 内容
+// 模拟真实 Claude Code 客户端在 system prompt 首行注入的计费属性头
+// 格式: x-anthropic-billing-header: cc_version=<ver>.<fingerprint>; cc_entrypoint=cli;
+func (c *Config) GetBillingHeader() string {
+	// 生成 3 位指纹：基于版本号的确定性哈希
+	version := ClaudeCodeVersion
+	salt := "59cf53e54c78"
+	h := sha256.Sum256([]byte(salt + version))
+	fingerprint := fmt.Sprintf("%x", h[:2])[:3]
+	return fmt.Sprintf("x-anthropic-billing-header: cc_version=%s.%s; cc_entrypoint=cli;", version, fingerprint)
 }
 
 // GetProviderConfigByName 根据名称获取服务商配置

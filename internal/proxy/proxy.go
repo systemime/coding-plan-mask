@@ -156,6 +156,11 @@ func (p *Proxy) Forward(w http.ResponseWriter, r *http.Request) {
 	// 构建请求头
 	headers := p.buildHeaders(provider, codingAPIKey, r.Header)
 
+	// claudecode 模式：在请求体中注入 x-anthropic-billing-header
+	if config.NormalizeDisguiseTool(p.cfg.DisguiseTool) == "claudecode" && reqBody != nil {
+		body = p.injectBillingHeader(body, reqBody)
+	}
+
 	// 日志记录
 	p.logForwardRequest(model, inputTokens)
 
@@ -325,12 +330,61 @@ func (p *Proxy) buildHeaders(provider *config.ProviderConfig, apiKey string, req
 		}
 	}
 
+	// claudecode 模式：注入 x-client-request-id（仅当客户端未提供时）
+	if config.NormalizeDisguiseTool(p.cfg.DisguiseTool) == "claudecode" {
+		if headers.Get("x-client-request-id") == "" {
+			headers.Set("x-client-request-id", p.cfg.GetClientRequestID())
+		}
+	}
+
 	// 添加额外头部
 	for k, v := range provider.ExtraHeaders {
 		headers.Set(k, v)
 	}
 
 	return headers
+}
+
+// injectBillingHeader 在请求体的 system/system_prompt 字段首行注入 x-anthropic-billing-header
+// 模拟真实 Claude Code 客户端行为：将计费属性头作为 system prompt 的第一个块
+func (p *Proxy) injectBillingHeader(body []byte, reqBody map[string]interface{}) []byte {
+	billingHeader := p.cfg.GetBillingHeader()
+	if billingHeader == "" {
+		return body
+	}
+
+	modified := false
+
+	// 优先处理 "system" 字段（OpenAI 格式，字符串）
+	if sys, ok := reqBody["system"].(string); ok {
+		reqBody["system"] = billingHeader + "\n" + sys
+		modified = true
+	} else if sysArr, ok := reqBody["system"].([]interface{}); ok {
+		// system 是数组形式（Anthropic 格式）
+		newArr := make([]interface{}, len(sysArr)+1)
+		newArr[0] = billingHeader
+		for i, v := range sysArr {
+			newArr[i+1] = v
+		}
+		reqBody["system"] = newArr
+		modified = true
+	}
+
+	if !modified {
+		// 没有 system 字段，尝试 system_prompt
+		if sysPrompt, ok := reqBody["system_prompt"].(string); ok {
+			reqBody["system_prompt"] = billingHeader + "\n" + sysPrompt
+			modified = true
+		}
+	}
+
+	if modified {
+		if newBody, err := json.Marshal(reqBody); err == nil {
+			return newBody
+		}
+	}
+
+	return body
 }
 
 // handleStreamResponseWithStats 处理流式响应并统计

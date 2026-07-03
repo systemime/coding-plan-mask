@@ -207,7 +207,8 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := map[string]interface{}{
-		"ready": true,
+		"ready":            true,
+		"security_enabled": s.cfg.Security.Enabled,
 	}
 	s.writeJSON(w, http.StatusOK, resp)
 }

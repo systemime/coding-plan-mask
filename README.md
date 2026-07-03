@@ -55,6 +55,7 @@ Provider rules, available models, and subscription details can change over time.
 | 📊 **Usage Analytics** | Track token consumption in real-time with SQLite storage |
 | 📝 **Readable Logs** | Human-friendly token logs in non-debug mode |
 | 🔒 **Local Auth** | Protect your proxy with custom API key |
+| 🛡️ **Local Privacy Filter** | Optional EdgeClaw-Mini style S1/S2/S3 policy, redaction, block, full/clean audit, and local context selection |
 | ⚡ **High Performance** | Built in Go for maximum efficiency |
 | 🔧 **Flexible Configuration** | Support TOML config file, environment variables, and custom API URLs |
 | 📈 **Rate Limiting** | Built-in rate limiting to prevent abuse |
@@ -161,6 +162,19 @@ mock_models_resp = '{"object":"list","data":[{"id":"gpt-4","object":"model","own
 # When enabled, fixes null values in JSON Schema (required, enum, items, etc.)
 # Useful for API providers using Anthropic native protocol
 use_anthropic = false
+
+[security]
+# Disabled by default. Enable to redact/block before forwarding upstream.
+enabled = false  # When true, set [auth].local_api_key to use local security APIs
+handling_s2 = "redact"
+handling_s3 = "block"
+default_track = "clean"
+max_audit_items = 2000
+
+[security.redaction]
+email = true
+chinese_phone = true
+chinese_id = true
 ```
 
 #### 4. Start
@@ -188,6 +202,8 @@ Configure your AI coding tool to use:
 If your client hardcodes `/v1`, that still works. The proxy keeps local management endpoints and transparently forwards any other request path upstream.
 
 In non-debug mode, startup keeps the banner output and proxy activity is shown in a human-friendly text format instead of structured JSON logs.
+
+Privacy filtering is a low-CPU local rules baseline, not a full DLP or ML PII detector. Extend `[security.rules]` for project-specific secrets.
 
 ### 🎭 Tool Masking Options
 
@@ -227,6 +243,11 @@ The proxy reserves a small set of local management endpoints and transparently f
 | `/health` | GET | Health check |
 | `/ready` | GET | Readiness check |
 | `/stats` | GET | Usage statistics (JSON) |
+| `/redact` | POST | Local text redaction |
+| `/privacy/detect` | POST | Local sensitivity detection |
+| `/privacy/policy` | POST | Local allow/redact/review/block decision |
+| `/context/redact` / `/context/restore` | POST | Redact or restore text/messages context |
+| `/sessions/{id}` / `/sessions/{id}/messages` / `/sessions/{id}/context/select` | GET/POST | full/clean audit tracks and local context selection |
 | `/*` | Any | Forward any other path to the upstream API with disguised headers |
 
 ### 📊 Statistics & Management
@@ -279,6 +300,10 @@ You can also configure via environment variables:
 | `MOCK_MODELS` | Enable mock /models endpoint response (true/false) |
 | `MOCK_MODELS_RESP` | Mock /models response content (JSON string) |
 | `USE_ANTHROPIC` | Enable Anthropic format compatibility mode (true/false) |
+| `SECURITY_ENABLED` | Enable local privacy filter (true/false) |
+| `SECURITY_AUDIT_DIR` | Override full/clean audit directory |
+| `SECURITY_HANDLING_S2` / `SECURITY_HANDLING_S3` | Override S2/S3 handling action |
+| `SECURITY_REDACT_EMAIL` / `SECURITY_REDACT_CHINESE_PHONE` / `SECURITY_REDACT_CHINESE_ID` | Override default PII redaction toggles |
 
 ### ⚠️ Risk Warning
 
@@ -329,6 +354,7 @@ This project is provided for **educational and research purposes only**.
 | 📊 **用量统计** | 实时追踪 Token 消耗，SQLite 持久化存储 |
 | 📝 **可读日志** | 非 debug 模式下输出人类友好的 token 日志 |
 | 🔒 **本地认证** | 用自定义密钥保护你的代理 |
+| 🛡️ **本地隐私过滤** | 可选 EdgeClaw-Mini 风格 S1/S2/S3 策略、脱敏、阻断、full/clean 审计和本地上下文筛选 |
 | ⚡ **高性能** | Go 语言构建，极致效率 |
 | 🔧 **灵活配置** | 支持 TOML 配置文件、环境变量和自定义 API URL |
 | 🌊 **流式响应** | 实时流式转发响应，智能检测流式请求 |
@@ -428,6 +454,19 @@ mock_models_resp = '{"object":"list","data":[{"id":"gpt-4","object":"model","own
 # 启用后会修复请求体中的 schema 字段，将 null 转为正确的默认值
 # 适用于使用 Anthropic 原生协议的 API 供应商
 use_anthropic = false
+
+[security]
+# 默认关闭。启用后会在转发上游前本地脱敏/阻断；使用本地安全接口需配置 [auth].local_api_key。
+enabled = false
+handling_s2 = "redact"
+handling_s3 = "block"
+default_track = "clean"
+max_audit_items = 2000
+
+[security.redaction]
+email = true
+chinese_phone = true
+chinese_id = true
 ```
 
 #### 4. 启动
@@ -454,6 +493,8 @@ sudo systemctl start coding-plan-mask
 
 在非 `debug` 模式下，程序会保留启动横幅，并以人类可读的文本格式输出代理 token 日志，而不是结构化 JSON 日志。
 
+隐私过滤是低 CPU 的本地规则基线，不是完整 DLP 或机器学习 PII 检测器。项目专属敏感规则请通过 `[security.rules]` 扩展。
+
 ### 🎭 工具伪装选项
 
 | 工具 | 标识符 | User-Agent | 说明 |
@@ -478,6 +519,11 @@ sudo systemctl start coding-plan-mask
 | `/health` | GET | 健康检查 |
 | `/ready` | GET | 就绪检查 |
 | `/stats` | GET | 使用统计（JSON） |
+| `/redact` | POST | 本地文本脱敏 |
+| `/privacy/detect` | POST | 本地敏感级别检测 |
+| `/privacy/policy` | POST | 本地 allow/redact/review/block 策略判断 |
+| `/context/redact` / `/context/restore` | POST | 文本/消息上下文脱敏与还原 |
+| `/sessions/{id}` / `/sessions/{id}/messages` / `/sessions/{id}/context/select` | GET/POST | full/clean 审计轨和本地上下文筛选 |
 | `/*` | 任意 | 其余任意路径原样透传到上游 API，并附加伪装请求头 |
 
 ### 📊 统计与管理
@@ -528,6 +574,10 @@ curl http://127.0.0.1:8787/stats
 | `MOCK_MODELS` | 启用模拟 /models 端点响应 (true/false) |
 | `MOCK_MODELS_RESP` | 模拟 /models 响应内容 (JSON 字符串) |
 | `USE_ANTHROPIC` | 启用 Anthropic 格式兼容模式 (true/false) |
+| `SECURITY_ENABLED` | 启用本地隐私过滤 (true/false) |
+| `SECURITY_AUDIT_DIR` | 覆盖 full/clean 审计目录 |
+| `SECURITY_HANDLING_S2` / `SECURITY_HANDLING_S3` | 覆盖 S2/S3 处置策略 |
+| `SECURITY_REDACT_EMAIL` / `SECURITY_REDACT_CHINESE_PHONE` / `SECURITY_REDACT_CHINESE_ID` | 覆盖默认 PII 脱敏开关 |
 
 ### ⚠️ 风险预警
 

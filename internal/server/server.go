@@ -3,16 +3,22 @@ package server
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"coding-plan-mask/internal/config"
 	"coding-plan-mask/internal/proxy"
+	"coding-plan-mask/internal/security"
 	"coding-plan-mask/internal/storage"
 
 	"go.uber.org/zap"
@@ -20,23 +26,80 @@ import (
 
 // Server HTTP 服务器
 type Server struct {
-	cfg     *config.Config
-	proxy   *proxy.Proxy
-	logger  *zap.Logger
-	server  *http.Server
-	store   *storage.Storage
-	version string
+	cfg      *config.Config
+	proxy    *proxy.Proxy
+	logger   *zap.Logger
+	server   *http.Server
+	store    *storage.Storage
+	security *security.Service
+	version  string
 }
 
 // New 创建新服务器
 func New(cfg *config.Config, logger *zap.Logger, store *storage.Storage, version string) *Server {
-	return &Server{
-		cfg:     cfg,
-		logger:  logger,
-		proxy:   proxy.New(cfg, logger, store),
-		store:   store,
-		version: version,
+	securityDir := cfg.Security.AuditDir
+	if strings.TrimSpace(securityDir) == "" {
+		securityDir = filepath.Join(store.DataDir(), "edgeclaw-mini")
 	}
+	securitySvc := security.NewService(security.Settings{
+		Enabled:         cfg.Security.Enabled,
+		AuditDir:        securityDir,
+		DefaultTrack:    cfg.Security.DefaultTrack,
+		DefaultTopK:     cfg.Security.DefaultTopK,
+		MaxAuditEntries: cfg.Security.MaxAuditItems,
+		HandlingS2:      cfg.Security.HandlingS2,
+		HandlingS3:      cfg.Security.HandlingS3,
+		PlaceholderS3:   cfg.Security.PlaceholderS3,
+		SessionHeader:   cfg.Security.SessionHeader,
+		RedactionOptions: security.RedactionOptions{
+			InternalIP:     cfg.Security.Redaction.InternalIP,
+			Email:          cfg.Security.Redaction.Email,
+			EnvVar:         cfg.Security.Redaction.EnvVar,
+			CreditCard:     cfg.Security.Redaction.CreditCard,
+			ChinesePhone:   cfg.Security.Redaction.ChinesePhone,
+			ChineseID:      cfg.Security.Redaction.ChineseID,
+			ChineseAddress: cfg.Security.Redaction.ChineseAddress,
+			PIN:            cfg.Security.Redaction.PIN,
+		},
+		Rules: securityRulesFromConfig(cfg.Security.Rules),
+	}, logger)
+	return &Server{
+		cfg:      cfg,
+		logger:   logger,
+		proxy:    proxy.New(cfg, logger, store, securitySvc),
+		store:    store,
+		security: securitySvc,
+		version:  version,
+	}
+}
+
+func securityRulesFromConfig(cfg config.SecurityRulesConfig) security.PrivacyRules {
+	rules := security.DefaultPrivacyRules()
+	if len(cfg.KeywordsS2) > 0 {
+		rules.KeywordsS2 = cfg.KeywordsS2
+	}
+	if len(cfg.KeywordsS3) > 0 {
+		rules.KeywordsS3 = cfg.KeywordsS3
+	}
+	if len(cfg.PatternsS2) > 0 {
+		rules.PatternsS2 = cfg.PatternsS2
+	}
+	if len(cfg.PatternsS3) > 0 {
+		rules.PatternsS3 = cfg.PatternsS3
+	}
+	if len(cfg.ToolsS2.Tools) > 0 {
+		rules.ToolsS2.Tools = cfg.ToolsS2.Tools
+	}
+	if len(cfg.ToolsS2.Paths) > 0 {
+		rules.ToolsS2.Paths = cfg.ToolsS2.Paths
+	}
+	if len(cfg.ToolsS3.Tools) > 0 {
+		rules.ToolsS3.Tools = cfg.ToolsS3.Tools
+	}
+	if len(cfg.ToolsS3.Paths) > 0 {
+		rules.ToolsS3.Paths = cfg.ToolsS3.Paths
+	}
+	return rules
 }
 
 // SetupRoutes 设置路由
@@ -51,6 +114,12 @@ func (s *Server) SetupRoutes() http.Handler {
 
 	// 统计信息
 	mux.HandleFunc("/stats", s.handleStats)
+
+	// EdgeClaw-Mini 本地安全接口
+	mux.HandleFunc("/redact", s.handleSecurity)
+	mux.HandleFunc("/privacy/", s.handleSecurity)
+	mux.HandleFunc("/context/", s.handleSecurity)
+	mux.HandleFunc("/sessions/", s.handleSecurity)
 
 	// 其余路径全部透传到上游，仅根路径保留本地信息
 	mux.HandleFunc("/", s.handleProxy)
@@ -171,7 +240,8 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 
 // isLocalEndpoint 判断是否是本地管理端点
 func isLocalEndpoint(path string) bool {
-	return path == "/" || path == "/health" || path == "/ready" || path == "/stats"
+	return path == "/" || path == "/health" || path == "/ready" || path == "/stats" ||
+		path == "/redact" || strings.HasPrefix(path, "/privacy/") || strings.HasPrefix(path, "/context/") || strings.HasPrefix(path, "/sessions/")
 }
 
 // securityMiddleware 安全头中间件
@@ -222,6 +292,216 @@ func (s *Server) writeError(w http.ResponseWriter, code int, message string) {
 			"code":    fmt.Sprintf("%d", code),
 		},
 	})
+}
+
+func (s *Server) handleSecurity(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.Security.Enabled && strings.TrimSpace(s.cfg.LocalAPIKey) == "" {
+		s.writeError(w, http.StatusServiceUnavailable, "启用安全过滤时必须配置本地 API Key")
+		return
+	}
+	if !s.validateLocalAPIKey(r) {
+		s.writeError(w, http.StatusUnauthorized, "API Key 无效")
+		return
+	}
+
+	switch {
+	case r.Method == http.MethodPost && r.URL.Path == "/redact":
+		payload, ok := s.readJSONPayload(w, r)
+		if !ok {
+			return
+		}
+		text, ok := payload["text"].(string)
+		if !ok {
+			s.writeError(w, http.StatusBadRequest, "missing field: text")
+			return
+		}
+		resp, err := s.security.RedactText(text, parseRedactionOptions(payload["options"]))
+		if err != nil {
+			s.writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		s.writeJSON(w, http.StatusOK, resp)
+	case r.Method == http.MethodPost && r.URL.Path == "/context/redact":
+		payload, ok := s.readJSONPayload(w, r)
+		if !ok {
+			return
+		}
+		resp, err := s.security.RedactContext(payload)
+		if err != nil {
+			s.writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		s.writeJSON(w, http.StatusOK, resp)
+	case r.Method == http.MethodPost && r.URL.Path == "/context/restore":
+		payload, ok := s.readJSONPayload(w, r)
+		if !ok {
+			return
+		}
+		resp, err := s.security.RestoreContext(payload)
+		if err != nil {
+			s.writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		s.writeJSON(w, http.StatusOK, resp)
+	case r.Method == http.MethodPost && r.URL.Path == "/privacy/detect":
+		payload, ok := s.readJSONPayload(w, r)
+		if !ok {
+			return
+		}
+		resp, err := s.security.DetectPrivacy(payload)
+		if err != nil {
+			s.writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		s.writeJSON(w, http.StatusOK, resp)
+	case r.Method == http.MethodPost && r.URL.Path == "/privacy/policy":
+		payload, ok := s.readJSONPayload(w, r)
+		if !ok {
+			return
+		}
+		resp, err := s.security.EvaluatePrivacyPolicy(payload)
+		if err != nil {
+			s.writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		s.writeJSON(w, http.StatusOK, resp)
+	case strings.HasPrefix(r.URL.Path, "/sessions/"):
+		s.handleSecuritySessions(w, r)
+	default:
+		s.writeError(w, http.StatusNotFound, "not found")
+	}
+}
+
+func (s *Server) handleSecuritySessions(w http.ResponseWriter, r *http.Request) {
+	sessionID, suffix := parseSessionPath(r.URL.Path)
+	if sessionID == "" {
+		s.writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+
+	switch {
+	case r.Method == http.MethodGet && suffix == "":
+		track := r.URL.Query().Get("track")
+		limit := 0
+		if raw := r.URL.Query().Get("limit"); raw != "" {
+			value, err := strconv.Atoi(raw)
+			if err != nil {
+				s.writeError(w, http.StatusBadRequest, "invalid limit")
+				return
+			}
+			limit = value
+		}
+		resp, err := s.security.LoadSession(sessionID, track, limit)
+		if err != nil {
+			s.writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		s.writeJSON(w, http.StatusOK, resp)
+	case r.Method == http.MethodPost && suffix == "/messages":
+		payload, ok := s.readJSONPayload(w, r)
+		if !ok {
+			return
+		}
+		resp, err := s.security.WriteMessage(sessionID, payload)
+		if err != nil {
+			s.writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		s.writeJSON(w, http.StatusOK, resp)
+	case r.Method == http.MethodPost && suffix == "/context/select":
+		payload, ok := s.readJSONPayload(w, r)
+		if !ok {
+			return
+		}
+		resp, err := s.security.SelectSessionContext(sessionID, payload)
+		if err != nil {
+			s.writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		s.writeJSON(w, http.StatusOK, resp)
+	default:
+		s.writeError(w, http.StatusNotFound, "not found")
+	}
+}
+
+func parseSessionPath(path string) (string, string) {
+	if !strings.HasPrefix(path, "/sessions/") {
+		return "", ""
+	}
+	trimmed := strings.TrimPrefix(path, "/sessions/")
+	trimmed = strings.Trim(trimmed, "/")
+	if trimmed == "" {
+		return "", ""
+	}
+	parts := strings.Split(trimmed, "/")
+	sessionID := parts[0]
+	if len(parts) == 1 {
+		return sessionID, ""
+	}
+	return sessionID, "/" + strings.Join(parts[1:], "/")
+}
+
+func (s *Server) readJSONPayload(w http.ResponseWriter, r *http.Request) (map[string]interface{}, bool) {
+	defer r.Body.Close()
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, s.cfg.MaxRequestBodySize))
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, "读取请求体失败")
+		return nil, false
+	}
+	if len(body) == 0 {
+		return map[string]interface{}{}, true
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		s.writeError(w, http.StatusBadRequest, "请求体必须是 JSON object")
+		return nil, false
+	}
+	return payload, true
+}
+
+func (s *Server) validateLocalAPIKey(r *http.Request) bool {
+	if strings.TrimSpace(s.cfg.LocalAPIKey) == "" {
+		return true
+	}
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
+		return false
+	}
+	clientKey := strings.TrimPrefix(authHeader, "Bearer ")
+	return subtle.ConstantTimeCompare([]byte(clientKey), []byte(s.cfg.LocalAPIKey)) == 1
+}
+
+func parseRedactionOptions(raw interface{}) *security.RedactionOptions {
+	value, ok := raw.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	options := security.RedactionOptions{}
+	if item, ok := value["internal_ip"].(bool); ok {
+		options.InternalIP = item
+	}
+	if item, ok := value["email"].(bool); ok {
+		options.Email = item
+	}
+	if item, ok := value["env_var"].(bool); ok {
+		options.EnvVar = item
+	}
+	if item, ok := value["credit_card"].(bool); ok {
+		options.CreditCard = item
+	}
+	if item, ok := value["chinese_phone"].(bool); ok {
+		options.ChinesePhone = item
+	}
+	if item, ok := value["chinese_id"].(bool); ok {
+		options.ChineseID = item
+	}
+	if item, ok := value["chinese_address"].(bool); ok {
+		options.ChineseAddress = item
+	}
+	if item, ok := value["pin"].(bool); ok {
+		options.PIN = item
+	}
+	return &options
 }
 
 // Start 启动服务器

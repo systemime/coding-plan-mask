@@ -4,6 +4,7 @@ package proxy
 import (
 	"bufio"
 	"bytes"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ import (
 
 	"coding-plan-mask/internal/config"
 	"coding-plan-mask/internal/ratelimit"
+	"coding-plan-mask/internal/security"
 	"coding-plan-mask/internal/storage"
 
 	"go.uber.org/zap"
@@ -29,11 +31,12 @@ type Proxy struct {
 	client    *http.Client
 	logger    *zap.Logger
 	storage   *storage.Storage
+	security  *security.Service
 	output    io.Writer
 }
 
 // New 创建新的代理实例
-func New(cfg *config.Config, logger *zap.Logger, store *storage.Storage) *Proxy {
+func New(cfg *config.Config, logger *zap.Logger, store *storage.Storage, securitySvc *security.Service) *Proxy {
 	transport := &http.Transport{
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 20,
@@ -54,6 +57,7 @@ func New(cfg *config.Config, logger *zap.Logger, store *storage.Storage) *Proxy 
 		client:    client,
 		logger:    logger,
 		storage:   store,
+		security:  securitySvc,
 		output:    os.Stdout,
 	}
 }
@@ -101,6 +105,7 @@ func (p *Proxy) Forward(w http.ResponseWriter, r *http.Request) {
 		originalLen := len(body)
 		if fixedBody, err := fixAnthropicSchema(reqBody); err == nil {
 			if newBody, err := json.Marshal(fixedBody); err == nil {
+				reqBody = fixedBody
 				body = newBody
 				if p.cfg.Debug {
 					p.logger.Debug("Anthropic schema 修复完成",
@@ -130,6 +135,24 @@ func (p *Proxy) Forward(w http.ResponseWriter, r *http.Request) {
 	if !p.validateLocalAPIKey(r) {
 		p.writeError(w, http.StatusUnauthorized, "API Key 无效")
 		return
+	}
+
+	// 数据安全过滤
+	if p.security != nil && reqBody != nil {
+		updatedBody, decision, err := p.applySecurityFilter(r, reqBody)
+		if err != nil {
+			if policyErr, ok := err.(*security.PolicyError); ok {
+				p.writeError(w, policyErr.StatusCode, policyErr.Decision.Reason)
+				return
+			}
+			p.logger.Error("安全过滤失败", zap.Error(err))
+			p.writeError(w, http.StatusInternalServerError, "安全过滤失败")
+			return
+		}
+		if decision != nil && decision.Action == "redact" {
+			body = updatedBody
+			reqBody, model, inputTokens = parseRequestMetadata(body)
+		}
 	}
 
 	// 获取 Coding Plan API Key
@@ -186,10 +209,10 @@ func (p *Proxy) Forward(w http.ResponseWriter, r *http.Request) {
 			go func() {
 				duration := time.Since(startTime).Milliseconds()
 				updateRecord := &storage.RequestRecord{
-					StatusCode:  statusCode,
-					Duration:    float64(duration),
-					Success:     false,
-					ErrorMsg:    errMsg,
+					StatusCode: statusCode,
+					Duration:   float64(duration),
+					Success:    false,
+					ErrorMsg:   errMsg,
 				}
 				if err := p.storage.UpdateRequestWithResponse(recordID, updateRecord); err != nil {
 					p.logger.Error("更新失败记录失败", zap.Error(err))
@@ -199,7 +222,7 @@ func (p *Proxy) Forward(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 创建上游请求
-	upstreamReq, err := http.NewRequestWithContext(r.Context(), "POST", targetURL, bytes.NewReader(body))
+	upstreamReq, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL, bytes.NewReader(body))
 	if err != nil {
 		updateFailedRecord(http.StatusInternalServerError, "创建请求失败")
 		p.writeError(w, http.StatusInternalServerError, "创建请求失败")
@@ -301,7 +324,16 @@ func (p *Proxy) validateLocalAPIKey(r *http.Request) bool {
 
 	// 移除 "Bearer " 前缀
 	clientKey := strings.TrimPrefix(authHeader, "Bearer ")
-	return clientKey == localAPIKey
+	return subtle.ConstantTimeCompare([]byte(clientKey), []byte(localAPIKey)) == 1
+}
+
+func (p *Proxy) applySecurityFilter(r *http.Request, reqBody map[string]interface{}) ([]byte, *security.PolicyDecision, error) {
+	updated, decision, err := p.security.ProcessProxyPayload(r, reqBody)
+	if err != nil {
+		return nil, decision, err
+	}
+	body, marshalErr := json.Marshal(updated)
+	return body, decision, marshalErr
 }
 
 // buildHeaders 构建请求头
@@ -951,41 +983,41 @@ func fixSchemaValue(value interface{}, path string) interface{} {
 // isArrayField 判断字段名是否通常期望数组类型
 func isArrayField(key string) bool {
 	arrayFields := map[string]bool{
-		"required":        true,
-		"enum":            true,
-		"examples":        true,
-		"prefixItems":     true,
-		"anyOf":           true,
-		"allOf":           true,
-		"oneOf":           true,
-		"context":         true,
-		"commands":        true,
-		"options":         true,
-		"arguments":       true,
-		"parameters":      true,
-		"variables":       true,
-		"includes":        true,
-		"excludes":        true,
-		"items":           true, // 虽然 items 通常是对象，但也可能是数组（tuple items）
-		"defs":            true,
-		"definitions":     true,
-		"$defs":           true,
-		"schemas":         true,
-		"security":        true,
-		"servers":         true,
-		"paths":           true,
-		"tags":            true,
-		"externalDocs":    true,
-		"discriminator":   true,
-		"xml":             true,
-		"deprecated":      true,
-		"readOnly":        true,
-		"writeOnly":       true,
+		"required":         true,
+		"enum":             true,
+		"examples":         true,
+		"prefixItems":      true,
+		"anyOf":            true,
+		"allOf":            true,
+		"oneOf":            true,
+		"context":          true,
+		"commands":         true,
+		"options":          true,
+		"arguments":        true,
+		"parameters":       true,
+		"variables":        true,
+		"includes":         true,
+		"excludes":         true,
+		"items":            true, // 虽然 items 通常是对象，但也可能是数组（tuple items）
+		"defs":             true,
+		"definitions":      true,
+		"$defs":            true,
+		"schemas":          true,
+		"security":         true,
+		"servers":          true,
+		"paths":            true,
+		"tags":             true,
+		"externalDocs":     true,
+		"discriminator":    true,
+		"xml":              true,
+		"deprecated":       true,
+		"readOnly":         true,
+		"writeOnly":        true,
 		"contentMediaType": true,
-		"contentEncoding": true,
-		"if":              true,
-		"then":            true,
-		"else":            true,
+		"contentEncoding":  true,
+		"if":               true,
+		"then":             true,
+		"else":             true,
 	}
 	return arrayFields[key]
 }
@@ -993,15 +1025,15 @@ func isArrayField(key string) bool {
 // isObjectField 判断字段名是否通常期望对象类型
 func isObjectField(key string) bool {
 	objectFields := map[string]bool{
-		"properties":          true,
-		"additionalProperties": true,
-		"patternProperties":   true,
-		"dependencies":        true,
-		"dependentSchemas":    true,
-		"propertyNames":       true,
-		"unevaluatedItems":    true,
+		"properties":            true,
+		"additionalProperties":  true,
+		"patternProperties":     true,
+		"dependencies":          true,
+		"dependentSchemas":      true,
+		"propertyNames":         true,
+		"unevaluatedItems":      true,
 		"unevaluatedProperties": true,
-		"contentSchema":       true,
+		"contentSchema":         true,
 	}
 	return objectFields[key]
 }

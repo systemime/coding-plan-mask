@@ -118,6 +118,11 @@ func New(dataDir string) (*Storage, error) {
 	return s, nil
 }
 
+// DataDir 返回当前存储实例的数据目录。
+func (s *Storage) DataDir() string {
+	return filepath.Dir(s.path)
+}
+
 // initTables 初始化表结构
 func (s *Storage) initTables() error {
 	// 请求记录表

@@ -72,6 +72,48 @@ auth_prefix = ""
 use_anthropic = false
 
 # ============================================================================
+# 数据安全过滤配置 (EdgeClaw-Mini Go 集成)
+# ============================================================================
+[security]
+# 是否启用本地数据安全过滤；启用后本地安全接口要求配置 [auth].local_api_key
+enabled = false
+# 本地双轨审计目录 (留空则使用 data/edgeclaw-mini)
+audit_dir = ""
+# 默认审计轨道
+default_track = "clean"
+# 上下文筛选默认 top_k
+default_top_k = 5
+# 每个 session 轨道最多保留条数 (0 表示不限制)
+max_audit_items = 2000
+# S2 默认处置策略: allow/redact/review/block
+handling_s2 = "redact"
+# S3 默认处置策略: allow/redact/review/block
+handling_s3 = "block"
+# S3/阻断请求在 clean 轨中的占位符
+placeholder_s3 = "[PRIVATE]"
+# 用于识别对话会话的请求头
+session_header = "X-Session-Id"
+
+[security.redaction]
+# 以下规则默认关闭，按需开启
+internal_ip = false
+email = true
+env_var = false
+credit_card = false
+chinese_phone = true
+chinese_id = true
+chinese_address = false
+pin = false
+
+# 可选：覆盖默认检测规则；不配置时使用内置 EdgeClaw-Mini 规则
+# [security.rules]
+# keywords_s2 = ["project_secret"]
+# patterns_s3 = ["TOPSECRET-[0-9]+"]
+#
+# [security.rules.tools_s3]
+# paths = ["/vault", "~/.ssh"]
+
+# ============================================================================
 # 服务商默认 URL 参考
 # ============================================================================
 # zhipu:      https://open.bigmodel.cn/api/coding/paas/v4

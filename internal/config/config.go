@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -31,6 +32,7 @@ type ConfigFile struct {
 	Auth     AuthConfig     `toml:"auth"`
 	Endpoint EndpointConfig `toml:"endpoint"`
 	API      APIConfig      `toml:"api"`
+	Security SecurityConfig `toml:"security"`
 }
 
 // ServerConfig 服务器配置
@@ -84,6 +86,45 @@ type APIConfig struct {
 	UseAnthropic bool `toml:"use_anthropic"`
 }
 
+type SecurityConfig struct {
+	Enabled       bool                 `toml:"enabled"`
+	AuditDir      string               `toml:"audit_dir"`
+	DefaultTrack  string               `toml:"default_track"`
+	DefaultTopK   int                  `toml:"default_top_k"`
+	MaxAuditItems int                  `toml:"max_audit_items"`
+	HandlingS2    string               `toml:"handling_s2"`
+	HandlingS3    string               `toml:"handling_s3"`
+	PlaceholderS3 string               `toml:"placeholder_s3"`
+	SessionHeader string               `toml:"session_header"`
+	Redaction     SecurityRedactConfig `toml:"redaction"`
+	Rules         SecurityRulesConfig  `toml:"rules"`
+}
+
+type SecurityRedactConfig struct {
+	InternalIP     bool `toml:"internal_ip"`
+	Email          bool `toml:"email"`
+	EnvVar         bool `toml:"env_var"`
+	CreditCard     bool `toml:"credit_card"`
+	ChinesePhone   bool `toml:"chinese_phone"`
+	ChineseID      bool `toml:"chinese_id"`
+	ChineseAddress bool `toml:"chinese_address"`
+	PIN            bool `toml:"pin"`
+}
+
+type SecurityRulesConfig struct {
+	KeywordsS2 []string               `toml:"keywords_s2"`
+	KeywordsS3 []string               `toml:"keywords_s3"`
+	PatternsS2 []string               `toml:"patterns_s2"`
+	PatternsS3 []string               `toml:"patterns_s3"`
+	ToolsS2    SecurityToolRuleConfig `toml:"tools_s2"`
+	ToolsS3    SecurityToolRuleConfig `toml:"tools_s3"`
+}
+
+type SecurityToolRuleConfig struct {
+	Tools []string `toml:"tools"`
+	Paths []string `toml:"paths"`
+}
+
 // Config 应用配置（运行时使用）
 type Config struct {
 	mu sync.RWMutex
@@ -113,6 +154,7 @@ type Config struct {
 	MockModels        bool
 	MockModelsResp    string
 	UseAnthropic      bool // Anthropic 格式兼容模式
+	Security          SecurityConfig
 
 	configPath string
 }
@@ -192,6 +234,21 @@ func DefaultConfig() *Config {
 		Timeout:            120,
 		MaxRequestBodySize: 10 * 1024 * 1024,
 		MockModelsResp:     DefaultMockModelsResp,
+		Security: SecurityConfig{
+			Enabled:       false,
+			DefaultTrack:  "clean",
+			DefaultTopK:   5,
+			MaxAuditItems: 2000,
+			HandlingS2:    "redact",
+			HandlingS3:    "block",
+			PlaceholderS3: "[PRIVATE]",
+			SessionHeader: "X-Session-Id",
+			Redaction: SecurityRedactConfig{
+				Email:        true,
+				ChinesePhone: true,
+				ChineseID:    true,
+			},
+		},
 	}
 }
 
@@ -271,7 +328,8 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	var cfgFile ConfigFile
-	if _, err := toml.Decode(string(data), &cfgFile); err != nil {
+	metadata, err := toml.Decode(string(data), &cfgFile)
+	if err != nil {
 		return nil, fmt.Errorf("解析配置文件失败: %w", err)
 	}
 
@@ -316,6 +374,36 @@ func LoadConfig(path string) (*Config, error) {
 	cfg.UseAnthropic = cfgFile.API.UseAnthropic
 	if cfgFile.API.MockModelsResp != "" {
 		cfg.MockModelsResp = cfgFile.API.MockModelsResp
+	}
+	cfg.Security.Enabled = cfgFile.Security.Enabled
+	if cfgFile.Security.AuditDir != "" {
+		cfg.Security.AuditDir = cfgFile.Security.AuditDir
+	}
+	if cfgFile.Security.DefaultTrack != "" {
+		cfg.Security.DefaultTrack = cfgFile.Security.DefaultTrack
+	}
+	if cfgFile.Security.DefaultTopK != 0 {
+		cfg.Security.DefaultTopK = cfgFile.Security.DefaultTopK
+	}
+	if cfgFile.Security.MaxAuditItems != 0 {
+		cfg.Security.MaxAuditItems = cfgFile.Security.MaxAuditItems
+	}
+	if cfgFile.Security.HandlingS2 != "" {
+		cfg.Security.HandlingS2 = cfgFile.Security.HandlingS2
+	}
+	if cfgFile.Security.HandlingS3 != "" {
+		cfg.Security.HandlingS3 = cfgFile.Security.HandlingS3
+	}
+	if cfgFile.Security.PlaceholderS3 != "" {
+		cfg.Security.PlaceholderS3 = cfgFile.Security.PlaceholderS3
+	}
+	if cfgFile.Security.SessionHeader != "" {
+		cfg.Security.SessionHeader = cfgFile.Security.SessionHeader
+	}
+	cfg.Security.Redaction = mergeSecurityRedactionConfig(cfg.Security.Redaction, cfgFile.Security.Redaction, metadata)
+	cfg.Security.Rules = cfgFile.Security.Rules
+	if err := validateSecurityRules(cfg.Security.Rules); err != nil {
+		return nil, err
 	}
 
 	cfg.loadFromEnv()
@@ -374,6 +462,58 @@ func (c *Config) loadFromEnv() {
 	if v := os.Getenv("USE_ANTHROPIC"); strings.ToLower(v) == "true" {
 		c.UseAnthropic = true
 	}
+	if v := os.Getenv("SECURITY_ENABLED"); strings.ToLower(v) == "true" {
+		c.Security.Enabled = true
+	}
+	if v := os.Getenv("SECURITY_AUDIT_DIR"); v != "" {
+		c.Security.AuditDir = v
+	}
+	if v := os.Getenv("SECURITY_HANDLING_S2"); v != "" {
+		c.Security.HandlingS2 = v
+	}
+	if v := os.Getenv("SECURITY_HANDLING_S3"); v != "" {
+		c.Security.HandlingS3 = v
+	}
+	if v := os.Getenv("SECURITY_REDACT_EMAIL"); v != "" {
+		c.Security.Redaction.Email = strings.ToLower(v) == "true"
+	}
+	if v := os.Getenv("SECURITY_REDACT_CHINESE_PHONE"); v != "" {
+		c.Security.Redaction.ChinesePhone = strings.ToLower(v) == "true"
+	}
+	if v := os.Getenv("SECURITY_REDACT_CHINESE_ID"); v != "" {
+		c.Security.Redaction.ChineseID = strings.ToLower(v) == "true"
+	}
+}
+
+func mergeSecurityRedactionConfig(base, override SecurityRedactConfig, metadata toml.MetaData) SecurityRedactConfig {
+	fields := []struct {
+		key string
+		set func()
+	}{
+		{"internal_ip", func() { base.InternalIP = override.InternalIP }},
+		{"email", func() { base.Email = override.Email }},
+		{"env_var", func() { base.EnvVar = override.EnvVar }},
+		{"credit_card", func() { base.CreditCard = override.CreditCard }},
+		{"chinese_phone", func() { base.ChinesePhone = override.ChinesePhone }},
+		{"chinese_id", func() { base.ChineseID = override.ChineseID }},
+		{"chinese_address", func() { base.ChineseAddress = override.ChineseAddress }},
+		{"pin", func() { base.PIN = override.PIN }},
+	}
+	for _, field := range fields {
+		if metadata.IsDefined("security", "redaction", field.key) {
+			field.set()
+		}
+	}
+	return base
+}
+
+func validateSecurityRules(rules SecurityRulesConfig) error {
+	for _, pattern := range append(append([]string{}, rules.PatternsS2...), rules.PatternsS3...) {
+		if _, err := regexp.Compile(`(?i)` + pattern); err != nil {
+			return fmt.Errorf("security.rules pattern %q invalid: %w", pattern, err)
+		}
+	}
+	return nil
 }
 
 // Set 设置配置项
@@ -426,6 +566,14 @@ func (c *Config) Set(key string, value string) error {
 		c.MockModelsResp = value
 	case "use_anthropic":
 		c.UseAnthropic = strings.ToLower(value) == "true"
+	case "security_enabled":
+		c.Security.Enabled = strings.ToLower(value) == "true"
+	case "security_audit_dir":
+		c.Security.AuditDir = value
+	case "security_handling_s2":
+		c.Security.HandlingS2 = value
+	case "security_handling_s3":
+		c.Security.HandlingS3 = value
 	default:
 		return fmt.Errorf("未知配置项: %s", key)
 	}
@@ -564,6 +712,17 @@ func (c *Config) GetSafe() map[string]interface{} {
 		"mock_models":            c.MockModels,
 		"mock_models_resp":       c.MockModelsResp,
 		"use_anthropic":          c.UseAnthropic,
+		"security": map[string]interface{}{
+			"enabled":         c.Security.Enabled,
+			"audit_dir":       c.Security.AuditDir,
+			"default_track":   c.Security.DefaultTrack,
+			"default_top_k":   c.Security.DefaultTopK,
+			"max_audit_items": c.Security.MaxAuditItems,
+			"handling_s2":     c.Security.HandlingS2,
+			"handling_s3":     c.Security.HandlingS3,
+			"placeholder_s3":  c.Security.PlaceholderS3,
+			"session_header":  c.Security.SessionHeader,
+		},
 	}
 }
 
@@ -677,6 +836,40 @@ mock_models_resp = '{"object":"list","data":[{"id":"gpt-4","object":"model","own
 # 启用后会修复请求体中的 schema 字段，将 null 转为正确的默认值
 # 适用于使用 Anthropic 原生协议的 API 供应商
 use_anthropic = false
+
+# ============================================================================
+# 数据安全过滤配置 (EdgeClaw-Mini Go 集成)
+# ============================================================================
+[security]
+# 是否启用本地数据安全过滤；启用后本地安全接口要求配置 [auth].local_api_key
+enabled = false
+# 本地双轨审计目录 (留空则使用 data/edgeclaw-mini)
+audit_dir = ""
+# 默认审计轨道
+default_track = "clean"
+# 上下文筛选默认 top_k
+default_top_k = 5
+# 每个 session 轨道最多保留条数 (0 表示不限制)
+max_audit_items = 2000
+# S2 默认处置策略: allow/redact/review/block
+handling_s2 = "redact"
+# S3 默认处置策略: allow/redact/review/block
+handling_s3 = "block"
+# S3/阻断请求在 clean 轨中的占位符
+placeholder_s3 = "[PRIVATE]"
+# 用于识别对话会话的请求头
+session_header = "X-Session-Id"
+
+[security.redaction]
+# 以下规则默认关闭，按需开启
+internal_ip = false
+email = true
+env_var = false
+credit_card = false
+chinese_phone = true
+chinese_id = true
+chinese_address = false
+pin = false
 `
 
 	return os.WriteFile(path, []byte(defaultContent), 0644)

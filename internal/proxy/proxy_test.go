@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"coding-plan-mask/internal/config"
+	"coding-plan-mask/internal/security"
 	"coding-plan-mask/internal/storage"
 
 	"go.uber.org/zap"
@@ -262,7 +263,7 @@ func TestHandleStreamResponsePreservesEventBoundaries(t *testing.T) {
 	}
 	defer store.Close()
 
-	p := New(cfg, zap.NewNop(), store)
+	p := New(cfg, zap.NewNop(), store, nil)
 
 	recorder := &flushingRecorder{ResponseRecorder: httptest.NewRecorder()}
 	resp := &http.Response{
@@ -317,6 +318,272 @@ func TestEstimateOutputTokensFromResponseFallsBackToContent(t *testing.T) {
 	got := estimateOutputTokensFromResponse(respData, nil)
 	if got <= 0 {
 		t.Fatalf("expected fallback output token estimate to be positive, got %d", got)
+	}
+}
+
+func TestForwardRedactsSensitiveMessagesWhenSecurityEnabled(t *testing.T) {
+	store, err := storage.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("create storage: %v", err)
+	}
+	defer store.Close()
+
+	var receivedBody map[string]interface{}
+	var decodeErr error
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&receivedBody); err != nil {
+			decodeErr = err
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}]}`))
+	}))
+	defer upstream.Close()
+
+	cfg := config.DefaultConfig()
+	cfg.Provider = "custom"
+	cfg.APIKey = "upstream-test-key"
+	cfg.CustomBaseURL = upstream.URL
+	cfg.CustomCodingURL = upstream.URL
+	cfg.Security.Enabled = true
+	cfg.Security.HandlingS2 = "redact"
+	cfg.Security.HandlingS3 = "block"
+	cfg.Security.SessionHeader = "X-Session-Id"
+	cfg.Security.Redaction.Email = true
+
+	securitySvc := security.NewService(security.Settings{
+		Enabled:         true,
+		AuditDir:        t.TempDir(),
+		DefaultTrack:    "clean",
+		DefaultTopK:     5,
+		HandlingS2:      "redact",
+		HandlingS3:      "block",
+		PlaceholderS3:   "[PRIVATE]",
+		SessionHeader:   "X-Session-Id",
+		MaxAuditEntries: 100,
+	}, zap.NewNop())
+
+	p := New(cfg, zap.NewNop(), store, securitySvc)
+
+	req := httptest.NewRequest(http.MethodPost, "/chat/completions", strings.NewReader(`{"messages":[{"role":"user","content":"my password is abc123"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Session-Id", "proxy-sec-session")
+	rec := httptest.NewRecorder()
+
+	p.Forward(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s decodeErr=%v", rec.Code, rec.Body.String(), decodeErr)
+	}
+	content := receivedBody["messages"].([]interface{})[0].(map[string]interface{})["content"].(string)
+	if content != "my password is [REDACTED:PASSWORD]" {
+		t.Fatalf("unexpected forwarded content: %q", content)
+	}
+}
+
+func TestForwardBlocksSensitivePathsWhenSecurityEnabled(t *testing.T) {
+	store, err := storage.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("create storage: %v", err)
+	}
+	defer store.Close()
+
+	upstreamCalled := false
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalled = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	cfg := config.DefaultConfig()
+	cfg.Provider = "custom"
+	cfg.APIKey = "upstream-test-key"
+	cfg.CustomBaseURL = upstream.URL
+	cfg.CustomCodingURL = upstream.URL
+	cfg.Security.Enabled = true
+	cfg.Security.HandlingS2 = "redact"
+	cfg.Security.HandlingS3 = "block"
+
+	securitySvc := security.NewService(security.Settings{
+		Enabled:         true,
+		AuditDir:        t.TempDir(),
+		DefaultTrack:    "clean",
+		DefaultTopK:     5,
+		HandlingS2:      "redact",
+		HandlingS3:      "block",
+		PlaceholderS3:   "[PRIVATE]",
+		SessionHeader:   "X-Session-Id",
+		MaxAuditEntries: 100,
+	}, zap.NewNop())
+
+	p := New(cfg, zap.NewNop(), store, securitySvc)
+
+	req := httptest.NewRequest(http.MethodPost, "/chat/completions", strings.NewReader(`{"messages":[{"role":"user","content":"read ~/.ssh/id_rsa now"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	p.Forward(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", rec.Code)
+	}
+	if upstreamCalled {
+		t.Fatal("expected upstream not to be called when security blocks the request")
+	}
+}
+
+func TestForwardPreservesOriginalHTTPMethod(t *testing.T) {
+	store, err := storage.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("create storage: %v", err)
+	}
+	defer store.Close()
+
+	var upstreamMethod string
+	var upstreamQuery string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamMethod = r.Method
+		upstreamQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[]}`))
+	}))
+	defer upstream.Close()
+
+	cfg := config.DefaultConfig()
+	cfg.Provider = "custom"
+	cfg.APIKey = "upstream-test-key"
+	cfg.CustomBaseURL = upstream.URL
+	cfg.CustomCodingURL = upstream.URL
+
+	p := New(cfg, zap.NewNop(), store, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/models?limit=10", nil)
+	rec := httptest.NewRecorder()
+
+	p.Forward(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if upstreamMethod != http.MethodGet {
+		t.Fatalf("expected upstream method GET, got %s", upstreamMethod)
+	}
+	if upstreamQuery != "limit=10" {
+		t.Fatalf("expected upstream query to be preserved, got %q", upstreamQuery)
+	}
+}
+
+func TestForwardRedactsToolCallArgumentsWhenSecurityEnabled(t *testing.T) {
+	store, err := storage.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("create storage: %v", err)
+	}
+	defer store.Close()
+
+	var receivedBody map[string]interface{}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&receivedBody); err != nil {
+			t.Fatalf("decode upstream body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}]}`))
+	}))
+	defer upstream.Close()
+
+	cfg := config.DefaultConfig()
+	cfg.Provider = "custom"
+	cfg.APIKey = "upstream-test-key"
+	cfg.CustomBaseURL = upstream.URL
+	cfg.CustomCodingURL = upstream.URL
+	cfg.Security.Enabled = true
+	cfg.Security.HandlingS2 = "redact"
+	cfg.Security.HandlingS3 = "block"
+
+	securitySvc := security.NewService(security.Settings{
+		Enabled:         true,
+		AuditDir:        t.TempDir(),
+		DefaultTrack:    "clean",
+		DefaultTopK:     5,
+		HandlingS2:      "redact",
+		HandlingS3:      "block",
+		PlaceholderS3:   "[PRIVATE]",
+		SessionHeader:   "X-Session-Id",
+		MaxAuditEntries: 100,
+	}, zap.NewNop())
+
+	p := New(cfg, zap.NewNop(), store, securitySvc)
+
+	req := httptest.NewRequest(http.MethodPost, "/chat/completions", strings.NewReader(`{"messages":[{"role":"assistant","tool_calls":[{"type":"function","function":{"name":"read_file","arguments":"{\"path\":\"~/.ssh/id_rsa\",\"note\":\"password is abc123\"}"}}]}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	p.Forward(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for sensitive tool arguments, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestForwardRedactsTopLevelToolParamsWhenSecurityEnabled(t *testing.T) {
+	store, err := storage.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("create storage: %v", err)
+	}
+	defer store.Close()
+
+	var receivedBody map[string]interface{}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&receivedBody); err != nil {
+			t.Fatalf("decode upstream body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}]}`))
+	}))
+	defer upstream.Close()
+
+	cfg := config.DefaultConfig()
+	cfg.Provider = "custom"
+	cfg.APIKey = "upstream-test-key"
+	cfg.CustomBaseURL = upstream.URL
+	cfg.CustomCodingURL = upstream.URL
+	cfg.Security.Enabled = true
+	cfg.Security.HandlingS2 = "redact"
+	cfg.Security.HandlingS3 = "block"
+
+	securitySvc := security.NewService(security.Settings{
+		Enabled:         true,
+		AuditDir:        t.TempDir(),
+		DefaultTrack:    "clean",
+		DefaultTopK:     5,
+		HandlingS2:      "redact",
+		HandlingS3:      "block",
+		PlaceholderS3:   "[PRIVATE]",
+		SessionHeader:   "X-Session-Id",
+		MaxAuditEntries: 100,
+	}, zap.NewNop())
+
+	p := New(cfg, zap.NewNop(), store, securitySvc)
+
+	req := httptest.NewRequest(http.MethodPost, "/chat/completions", strings.NewReader(`{"messages":[{"role":"user","content":"run the tool"}],"tool_params":{"password":"abc123","path":"./notes.txt"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	p.Forward(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	toolParams := receivedBody["tool_params"].(map[string]interface{})
+	if toolParams["password"].(string) != "[REDACTED:PASSWORD]" {
+		t.Fatalf("expected top-level tool_params.password to be redacted, got %q", toolParams["password"].(string))
+	}
+	if toolParams["path"].(string) != "./notes.txt" {
+		t.Fatalf("expected non-sensitive path to be preserved, got %q", toolParams["path"].(string))
 	}
 }
 
@@ -399,7 +666,7 @@ func TestMockModelsResponse(t *testing.T) {
 	cfg.MockModelsResp = `{"object":"list","data":[{"id":"test-model","object":"model","owned_by":"test"}]}`
 	cfg.LocalAPIKey = "" // 不验证本地 API Key
 
-	p := New(cfg, zap.NewNop(), store)
+	p := New(cfg, zap.NewNop(), store, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/models", nil)
 	recorder := httptest.NewRecorder()
@@ -433,7 +700,7 @@ func TestMockModelsWithV1Path(t *testing.T) {
 	cfg.MockModelsResp = `{"object":"list","data":[{"id":"v1-model"}]}`
 	cfg.LocalAPIKey = ""
 
-	p := New(cfg, zap.NewNop(), store)
+	p := New(cfg, zap.NewNop(), store, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	recorder := httptest.NewRecorder()
@@ -472,7 +739,7 @@ func TestMockModelsWithRemoveVersionPath(t *testing.T) {
 	cfg.MockModelsResp = `{"object":"list","data":[{"id":"v2-model"}]}`
 	cfg.LocalAPIKey = ""
 
-	p := New(cfg, zap.NewNop(), nil)
+	p := New(cfg, zap.NewNop(), nil, nil)
 
 	tests := []struct {
 		path       string

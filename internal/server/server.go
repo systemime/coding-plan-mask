@@ -321,6 +321,8 @@ func (s *Server) writeError(w http.ResponseWriter, code int, message string) {
 }
 
 func (s *Server) handleSecurity(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
 	if s.cfg.Security.Enabled && strings.TrimSpace(s.cfg.LocalAPIKey) == "" {
 		s.writeError(w, http.StatusServiceUnavailable, "启用安全过滤时必须配置本地 API Key")
 		return

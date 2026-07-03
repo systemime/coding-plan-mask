@@ -147,6 +147,9 @@ func TestRedactRouteUsesLocalSecurityService(t *testing.T) {
 	if !bytes.Contains(rec.Body.Bytes(), []byte(`REDACTED`)) {
 		t.Fatalf("expected redacted response body, got %s", rec.Body.String())
 	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("expected no-store cache header, got %q", got)
+	}
 }
 
 func TestSecurityRouteRequiresLocalKeyWhenSecurityEnabled(t *testing.T) {

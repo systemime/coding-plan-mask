@@ -841,7 +841,7 @@ use_anthropic = false
 # 数据安全过滤配置 (EdgeClaw-Mini Go 集成)
 # ============================================================================
 [security]
-# 是否启用本地数据安全过滤；启用后本地安全接口要求配置 [auth].local_api_key
+# 是否启用本地数据安全过滤；启用后代理和本地安全接口都要求配置 [auth].local_api_key
 enabled = false
 # 本地双轨审计目录 (留空则使用 data/edgeclaw-mini)
 audit_dir = ""

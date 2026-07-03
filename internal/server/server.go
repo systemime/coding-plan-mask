@@ -195,6 +195,13 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if s.cfg.Security.Enabled && strings.TrimSpace(s.cfg.LocalAPIKey) == "" {
+		s.writeJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
+			"ready":  false,
+			"reason": "启用安全过滤时必须配置本地 API Key",
+		})
+		return
+	}
 
 	resp := map[string]interface{}{
 		"ready": true,

@@ -313,7 +313,7 @@ func (p *Proxy) validateLocalAPIKey(r *http.Request) bool {
 
 	// 如果未配置本地 API Key，则不验证
 	if localAPIKey == "" {
-		return true
+		return !p.cfg.Security.Enabled
 	}
 
 	// 从请求头获取客户端 API Key

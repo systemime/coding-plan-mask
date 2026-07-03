@@ -89,6 +89,28 @@ func TestVersionedProxyRouteIsHandled(t *testing.T) {
 	}
 }
 
+func TestReadyFailsWhenSecurityEnabledWithoutLocalKey(t *testing.T) {
+	store, err := storage.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("create storage: %v", err)
+	}
+	defer store.Close()
+
+	cfg := config.DefaultConfig()
+	cfg.APIKey = "upstream-test-key"
+	cfg.Security.Enabled = true
+	srv := New(cfg, zap.NewNop(), store, "test")
+
+	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+	rec := httptest.NewRecorder()
+
+	srv.SetupRoutes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 readiness without local key, got %d", rec.Code)
+	}
+}
+
 func TestPrivacyPolicyRouteReturnsLocalSecurityDecision(t *testing.T) {
 	srv := newSecurityTestServer(t)
 	handler := srv.SetupRoutes()

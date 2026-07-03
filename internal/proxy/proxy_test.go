@@ -348,6 +348,7 @@ func TestForwardRedactsSensitiveMessagesWhenSecurityEnabled(t *testing.T) {
 	cfg.CustomBaseURL = upstream.URL
 	cfg.CustomCodingURL = upstream.URL
 	cfg.Security.Enabled = true
+	cfg.LocalAPIKey = "sk-test"
 	cfg.Security.HandlingS2 = "redact"
 	cfg.Security.HandlingS3 = "block"
 	cfg.Security.SessionHeader = "X-Session-Id"
@@ -369,6 +370,7 @@ func TestForwardRedactsSensitiveMessagesWhenSecurityEnabled(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/chat/completions", strings.NewReader(`{"messages":[{"role":"user","content":"my password is abc123"}]}`))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer sk-test")
 	req.Header.Set("X-Session-Id", "proxy-sec-session")
 	rec := httptest.NewRecorder()
 
@@ -403,6 +405,7 @@ func TestForwardBlocksSensitivePathsWhenSecurityEnabled(t *testing.T) {
 	cfg.CustomBaseURL = upstream.URL
 	cfg.CustomCodingURL = upstream.URL
 	cfg.Security.Enabled = true
+	cfg.LocalAPIKey = "sk-test"
 	cfg.Security.HandlingS2 = "redact"
 	cfg.Security.HandlingS3 = "block"
 
@@ -422,6 +425,7 @@ func TestForwardBlocksSensitivePathsWhenSecurityEnabled(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/chat/completions", strings.NewReader(`{"messages":[{"role":"user","content":"read ~/.ssh/id_rsa now"}]}`))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer sk-test")
 	rec := httptest.NewRecorder()
 
 	p.Forward(rec, req)
@@ -431,6 +435,29 @@ func TestForwardBlocksSensitivePathsWhenSecurityEnabled(t *testing.T) {
 	}
 	if upstreamCalled {
 		t.Fatal("expected upstream not to be called when security blocks the request")
+	}
+}
+
+func TestForwardRequiresLocalKeyWhenSecurityEnabled(t *testing.T) {
+	store, err := storage.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("create storage: %v", err)
+	}
+	defer store.Close()
+
+	cfg := config.DefaultConfig()
+	cfg.Security.Enabled = true
+	cfg.APIKey = "upstream-test-key"
+	p := New(cfg, zap.NewNop(), store, security.NewService(security.Settings{Enabled: true, AuditDir: t.TempDir()}, zap.NewNop()))
+
+	req := httptest.NewRequest(http.MethodPost, "/chat/completions", strings.NewReader(`{"messages":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	p.Forward(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 when security is enabled without local key, got %d", rec.Code)
 	}
 }
 
@@ -499,6 +526,7 @@ func TestForwardRedactsToolCallArgumentsWhenSecurityEnabled(t *testing.T) {
 	cfg.CustomBaseURL = upstream.URL
 	cfg.CustomCodingURL = upstream.URL
 	cfg.Security.Enabled = true
+	cfg.LocalAPIKey = "sk-test"
 	cfg.Security.HandlingS2 = "redact"
 	cfg.Security.HandlingS3 = "block"
 
@@ -518,6 +546,7 @@ func TestForwardRedactsToolCallArgumentsWhenSecurityEnabled(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/chat/completions", strings.NewReader(`{"messages":[{"role":"assistant","tool_calls":[{"type":"function","function":{"name":"read_file","arguments":"{\"path\":\"~/.ssh/id_rsa\",\"note\":\"password is abc123\"}"}}]}]}`))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer sk-test")
 	rec := httptest.NewRecorder()
 
 	p.Forward(rec, req)
@@ -551,6 +580,7 @@ func TestForwardRedactsTopLevelToolParamsWhenSecurityEnabled(t *testing.T) {
 	cfg.CustomBaseURL = upstream.URL
 	cfg.CustomCodingURL = upstream.URL
 	cfg.Security.Enabled = true
+	cfg.LocalAPIKey = "sk-test"
 	cfg.Security.HandlingS2 = "redact"
 	cfg.Security.HandlingS3 = "block"
 
@@ -570,6 +600,7 @@ func TestForwardRedactsTopLevelToolParamsWhenSecurityEnabled(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/chat/completions", strings.NewReader(`{"messages":[{"role":"user","content":"run the tool"}],"tool_params":{"password":"abc123","path":"./notes.txt"}}`))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer sk-test")
 	rec := httptest.NewRecorder()
 
 	p.Forward(rec, req)

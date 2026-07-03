@@ -165,7 +165,7 @@ use_anthropic = false
 
 [security]
 # Disabled by default. Enable to redact/block before forwarding upstream.
-enabled = false  # When true, set [auth].local_api_key to use local security APIs
+enabled = false  # When true, set [auth].local_api_key for proxy/security APIs
 handling_s2 = "redact"
 handling_s3 = "block"
 default_track = "clean"
@@ -456,7 +456,7 @@ mock_models_resp = '{"object":"list","data":[{"id":"gpt-4","object":"model","own
 use_anthropic = false
 
 [security]
-# 默认关闭。启用后会在转发上游前本地脱敏/阻断；使用本地安全接口需配置 [auth].local_api_key。
+# 默认关闭。启用后会在转发上游前本地脱敏/阻断；代理和本地安全接口都需配置 [auth].local_api_key。
 enabled = false
 handling_s2 = "redact"
 handling_s3 = "block"

@@ -171,6 +171,22 @@ func TestSecurityRouteRequiresLocalKeyWhenSecurityEnabled(t *testing.T) {
 	}
 }
 
+func TestRecoverMiddlewareHandlesPanics(t *testing.T) {
+	srv := newTestServer(t)
+	handler := srv.recoverMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		panic("boom")
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/panic", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 for recovered panic, got %d", rec.Code)
+	}
+}
+
 func TestSecurityRulesFromConfigOverridesDefaults(t *testing.T) {
 	rules := securityRulesFromConfig(config.SecurityRulesConfig{
 		KeywordsS2: []string{"project_secret"},

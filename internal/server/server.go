@@ -130,6 +130,9 @@ func (s *Server) SetupRoutes() http.Handler {
 	// 安全头中间件
 	handler = s.securityMiddleware(handler)
 
+	// panic 兜底，避免单个请求打垮进程
+	handler = s.recoverMiddleware(handler)
+
 	return handler
 }
 
@@ -262,6 +265,22 @@ func (s *Server) securityMiddleware(next http.Handler) http.Handler {
 		// CORS 头（可选）
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) recoverMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				s.logger.Error("HTTP 请求 panic",
+					zap.Any("panic", recovered),
+					zap.String("method", r.Method),
+					zap.String("path", r.URL.Path),
+				)
+				s.writeError(w, http.StatusInternalServerError, "内部服务错误")
+			}
+		}()
 		next.ServeHTTP(w, r)
 	})
 }

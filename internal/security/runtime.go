@@ -14,6 +14,7 @@ import (
 const (
 	maxAuditLineBytes = 16 * 1024 * 1024
 	auditTrimMinBytes = 8 * 1024 * 1024
+	maxSessionIDBytes = 128
 )
 
 type SessionEntry struct {
@@ -234,6 +235,9 @@ func safeSessionID(sessionID string) string {
 	}
 	if b.Len() == 0 {
 		return "default"
+	}
+	if b.Len() > maxSessionIDBytes {
+		return b.String()[:maxSessionIDBytes]
 	}
 	return b.String()
 }

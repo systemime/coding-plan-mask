@@ -51,4 +51,7 @@ func TestSafeSessionIDFallsBackWhenSanitizedEmpty(t *testing.T) {
 	if got := safeSessionID("////"); got != "____" {
 		t.Fatalf("expected slash characters to be sanitized, got %q", got)
 	}
+	if got := safeSessionID(strings.Repeat("a", 200)); len(got) != maxSessionIDBytes {
+		t.Fatalf("expected long session id to be capped at %d bytes, got %d", maxSessionIDBytes, len(got))
+	}
 }

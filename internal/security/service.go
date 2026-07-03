@@ -403,7 +403,7 @@ func (s *Service) ProcessProxyPayload(r *http.Request, payload map[string]interf
 			metadata["level"] = string(highest.Level)
 			metadata["reason"] = highest.Reason
 			if _, err := s.runtime.Append(sessionID, node.Role, node.Text, &clean, "", nowMillis(), metadata); err != nil {
-				s.logger.Warn("安全审计写入失败", zap.Error(err))
+				return payload, &highest, err
 			}
 		}
 		return payload, &highest, &PolicyError{
@@ -421,7 +421,7 @@ func (s *Service) ProcessProxyPayload(r *http.Request, payload map[string]interf
 			metadata["decision"] = highest.Action
 			metadata["level"] = string(highest.Level)
 			if _, err := s.runtime.Append(sessionID, node.Role, node.Text, &redactedText, "", nowMillis(), metadata); err != nil {
-				s.logger.Warn("安全审计写入失败", zap.Error(err))
+				return payload, &highest, err
 			}
 		}
 	default:
@@ -444,7 +444,7 @@ func (s *Service) ProcessProxyPayload(r *http.Request, payload map[string]interf
 			}
 			metadata["level"] = string(highest.Level)
 			if _, err := s.runtime.Append(sessionID, node.Role, node.Text, &redactedText, "", nowMillis(), metadata); err != nil {
-				s.logger.Warn("安全审计写入失败", zap.Error(err))
+				return payload, &highest, err
 			}
 		}
 		if redacted {

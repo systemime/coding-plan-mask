@@ -3,6 +3,7 @@ package security
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"go.uber.org/zap"
@@ -134,6 +135,31 @@ func TestProcessProxyPayloadRedactsJSONToolCallArguments(t *testing.T) {
 	functionMap := toolCall["function"].(map[string]interface{})
 	if got := functionMap["arguments"].(string); got != `{"password":"[REDACTED:PASSWORD]","path":"./notes.txt"}` {
 		t.Fatalf("unexpected redacted arguments: %s", got)
+	}
+}
+
+func TestProcessProxyPayloadFailsClosedWhenAuditWriteFails(t *testing.T) {
+	auditPath := t.TempDir() + "/audit-file"
+	if err := os.WriteFile(auditPath, []byte("not a directory"), 0600); err != nil {
+		t.Fatalf("write audit blocker: %v", err)
+	}
+	svc := NewService(Settings{
+		Enabled:       true,
+		AuditDir:      auditPath,
+		HandlingS2:    "redact",
+		HandlingS3:    "block",
+		PlaceholderS3: "[PRIVATE]",
+		SessionHeader: "X-Session-Id",
+	}, zap.NewNop())
+	req := httptest.NewRequest(http.MethodPost, "/chat/completions", nil)
+
+	_, _, err := svc.ProcessProxyPayload(req, map[string]interface{}{
+		"messages": []interface{}{
+			map[string]interface{}{"role": "user", "content": "hello"},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected audit write failure to stop proxy processing")
 	}
 }
 

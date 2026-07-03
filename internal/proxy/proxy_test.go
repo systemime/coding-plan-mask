@@ -941,6 +941,159 @@ func TestFixAnthropicSchema(t *testing.T) {
 	}
 }
 
+func TestForwardConvertsAnthropicMessagesToOpenAIChat(t *testing.T) {
+	store, err := storage.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("create storage: %v", err)
+	}
+	defer store.Close()
+
+	var upstreamPath string
+	var received map[string]interface{}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamPath = r.URL.Path
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Fatalf("decode upstream body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-1","model":"glm-5","choices":[{"message":{"role":"assistant","content":"pong"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":3}}`))
+	}))
+	defer upstream.Close()
+
+	cfg := config.DefaultConfig()
+	cfg.Provider = "custom"
+	cfg.APIKey = "upstream-test-key"
+	cfg.CustomBaseURL = upstream.URL
+	cfg.CustomCodingURL = upstream.URL
+	cfg.UseAnthropic = true
+
+	p := New(cfg, zap.NewNop(), store, nil)
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{
+		"model":"claude-3-5-sonnet",
+		"max_tokens":64,
+		"system":"be terse",
+		"messages":[{"role":"user","content":[{"type":"text","text":"ping"}]}],
+		"tools":[{"name":"lookup","description":"find","input_schema":{"type":"object","properties":{"q":{"type":"string"}}}}],
+		"tool_choice":{"type":"tool","name":"lookup"}
+	}`))
+	rec := httptest.NewRecorder()
+
+	p.Forward(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if upstreamPath != "/chat/completions" {
+		t.Fatalf("expected upstream /chat/completions, got %q", upstreamPath)
+	}
+	if received["model"] != "claude-3-5-sonnet" {
+		t.Fatalf("expected custom provider to preserve model, got %v", received["model"])
+	}
+	messages := received["messages"].([]interface{})
+	if messages[0].(map[string]interface{})["role"] != "system" || messages[0].(map[string]interface{})["content"] != "be terse" {
+		t.Fatalf("expected system message, got %#v", messages[0])
+	}
+	if messages[1].(map[string]interface{})["content"] != "ping" {
+		t.Fatalf("expected user text to be forwarded, got %#v", messages[1])
+	}
+	tool := received["tools"].([]interface{})[0].(map[string]interface{})
+	if tool["type"] != "function" {
+		t.Fatalf("expected OpenAI function tool, got %#v", tool)
+	}
+	choice := received["tool_choice"].(map[string]interface{})
+	if choice["type"] != "function" {
+		t.Fatalf("expected OpenAI function tool_choice, got %#v", choice)
+	}
+
+	var body map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["type"] != "message" || body["role"] != "assistant" {
+		t.Fatalf("expected Anthropic message response, got %#v", body)
+	}
+	content := body["content"].([]interface{})[0].(map[string]interface{})
+	if content["type"] != "text" || content["text"] != "pong" {
+		t.Fatalf("expected Anthropic text block, got %#v", content)
+	}
+	if body["stop_reason"] != "end_turn" {
+		t.Fatalf("expected stop_reason=end_turn, got %v", body["stop_reason"])
+	}
+}
+
+func TestAnthropicClaudeModelMapsToProviderModel(t *testing.T) {
+	provider := &config.ProviderConfig{Models: []string{"cheap-model", "coding-model"}}
+
+	if got := mapAnthropicModelForProvider("claude-3-5-sonnet", provider); got != "coding-model" {
+		t.Fatalf("expected provider model, got %q", got)
+	}
+	if got := mapAnthropicModelForProvider("gpt-4", provider); got != "gpt-4" {
+		t.Fatalf("expected non-Claude model to be preserved, got %q", got)
+	}
+}
+
+func TestConvertAnthropicToolBlocksToOpenAIChat(t *testing.T) {
+	got := convertAnthropicMessagesToOpenAIChat(map[string]interface{}{
+		"messages": []interface{}{
+			map[string]interface{}{
+				"role": "assistant",
+				"content": []interface{}{
+					map[string]interface{}{"type": "text", "text": "using tool"},
+					map[string]interface{}{"type": "tool_use", "id": "toolu_1", "name": "read_file", "input": map[string]interface{}{"path": "README.md"}},
+				},
+			},
+			map[string]interface{}{
+				"role": "user",
+				"content": []interface{}{
+					map[string]interface{}{"type": "tool_result", "tool_use_id": "toolu_1", "content": "done"},
+				},
+			},
+		},
+	})
+
+	messages := got["messages"].([]interface{})
+	assistant := messages[0].(map[string]interface{})
+	toolCalls := assistant["tool_calls"].([]interface{})
+	call := toolCalls[0].(map[string]interface{})
+	if call["id"] != "toolu_1" {
+		t.Fatalf("expected tool call id, got %#v", call)
+	}
+	functionMap := call["function"].(map[string]interface{})
+	if functionMap["name"] != "read_file" || !strings.Contains(functionMap["arguments"].(string), "README.md") {
+		t.Fatalf("unexpected function call: %#v", functionMap)
+	}
+	toolResult := messages[1].(map[string]interface{})
+	if toolResult["role"] != "tool" || toolResult["tool_call_id"] != "toolu_1" || toolResult["content"] != "done" {
+		t.Fatalf("unexpected tool result message: %#v", toolResult)
+	}
+}
+
+func TestHandleAnthropicStreamResponseConvertsOpenAIChunks(t *testing.T) {
+	cfg := config.DefaultConfig()
+	p := &Proxy{cfg: cfg, logger: zap.NewNop()}
+	rec := &flushingRecorder{ResponseRecorder: httptest.NewRecorder()}
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(
+			"data: {\"id\":\"chatcmpl-1\",\"model\":\"glm-5\",\"choices\":[{\"delta\":{\"content\":\"he\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{\"content\":\"llo\"},\"finish_reason\":\"stop\"}],\"usage\":{\"completion_tokens\":2}}\n\n" +
+				"data: [DONE]\n\n",
+		)),
+	}
+
+	p.handleAnthropicStreamResponseWithStats(rec, resp, time.Now(), http.MethodPost, "/v1/messages", "https://api.example.com/chat/completions", "glm-5", "127.0.0.1", 2, "{}", 0)
+
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, body)
+	}
+	if !strings.Contains(body, "event: message_start") || !strings.Contains(body, `"text":"he"`) || !strings.Contains(body, `"text":"llo"`) || !strings.Contains(body, "event: message_stop") {
+		t.Fatalf("expected Anthropic SSE events, got %s", body)
+	}
+}
+
 func TestInjectBillingHeaderWithStringSystem(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.DisguiseTool = "claudecode"

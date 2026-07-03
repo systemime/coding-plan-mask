@@ -82,7 +82,7 @@ type APIConfig struct {
 	// 模拟 /models 响应内容 (JSON 字符串)
 	MockModelsResp string `toml:"mock_models_resp"`
 	// Anthropic 格式兼容模式
-	// 启用后会修复请求体中的 schema 字段，将 null 转为正确的默认值
+	// 将 Anthropic /v1/messages 转为 OpenAI Chat Completions，并修复 JSON Schema null 值
 	UseAnthropic bool `toml:"use_anthropic"`
 }
 
@@ -833,8 +833,9 @@ mock_models = false
 # 模拟 /models 响应内容 (JSON 字符串)
 mock_models_resp = '{"object":"list","data":[{"id":"gpt-4","object":"model","owned_by":"organization"}]}'
 # Anthropic 格式兼容模式 (默认 false)
-# 启用后会修复请求体中的 schema 字段，将 null 转为正确的默认值
-# 适用于使用 Anthropic 原生协议的 API 供应商
+# 将 Anthropic /v1/messages 转为 OpenAI Chat Completions，并修复 JSON Schema null 值
+# 适用于 Claude 风格客户端连接 OpenAI 兼容上游
+# 内置服务商会将 claude-* 模型名映射到其推荐编码模型
 use_anthropic = false
 
 # ============================================================================

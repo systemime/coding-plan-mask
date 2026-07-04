@@ -2,13 +2,13 @@
 
 # 🎭 Coding Plan Mask
 
-**Unlock Your Coding Plan API Key for Any AI Coding Tool**
+**Local proxy for coding-client disguise and optional privacy filtering**
 
 [![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://golang.org/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.8.4-green.svg)](https://github.com/systemime/coding-plan-mask)
+[![Version](https://img.shields.io/badge/version-0.8.6-green.svg)](https://github.com/systemime/coding-plan-mask)
 
-*Use your Coding Plan subscription with ANY OpenAI-compatible coding tool*
+*Mask request origin locally, then optionally redact or block sensitive content before it leaves your machine*
 
 [English](#-english-documentation) | [中文文档](#-中文文档)
 
@@ -36,6 +36,8 @@ Provider rules, available models, and subscription details can change over time.
 
 **Coding Plan Mask** acts as a bridge between your Coding Plan API and any OpenAI-compatible tool. It **masks** your requests to appear as if they come from officially supported IDE tools.
 
+Scope is intentionally small: local proxy, request-origin disguise, OpenAI/Anthropic compatibility, and optional local privacy protection. It is not a GUI app, cloud sync service, MCP/Skills panel, or multi-tenant billing platform.
+
 ```
 ┌────────────────────┐     ┌──────────────────────┐     ┌─────────────────────┐
 │  Your Favorite AI  │────▶│   Coding Plan Mask   │────▶│   LLM Provider      │
@@ -55,7 +57,7 @@ Provider rules, available models, and subscription details can change over time.
 | 📊 **Usage Analytics** | Track token consumption in real-time with SQLite storage |
 | 📝 **Readable Logs** | Human-friendly token logs in non-debug mode |
 | 🔒 **Local Auth** | Protect your proxy with custom API key |
-| 🛡️ **Local Privacy Filter** | Optional EdgeClaw-Mini style S1/S2/S3 policy, redaction, block, full/clean audit, and local context selection |
+| 🛡️ **Local Privacy Filter** | Off by default; when enabled, applies local S1/S2/S3 policy, redaction, block, full/clean audit, and context selection |
 | ⚡ **High Performance** | Built in Go for maximum efficiency |
 | 🔧 **Flexible Configuration** | Support TOML config file, environment variables, and custom API URLs |
 | 📈 **Rate Limiting** | Built-in rate limiting to prevent abuse |
@@ -72,22 +74,22 @@ Download the binary for your platform from [GitHub Releases](https://github.com/
 
 ```bash
 # Linux amd64
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.5/mask-ctl-linux-amd64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.6/mask-ctl-linux-amd64
 chmod +x mask-ctl-linux-amd64
 sudo mv mask-ctl-linux-amd64 /usr/local/bin/mask-ctl
 
 # Linux arm64
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.5/mask-ctl-linux-arm64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.6/mask-ctl-linux-arm64
 chmod +x mask-ctl-linux-arm64
 sudo mv mask-ctl-linux-arm64 /usr/local/bin/mask-ctl
 
 # macOS (Darwin amd64)
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.5/mask-ctl-darwin-amd64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.6/mask-ctl-darwin-amd64
 chmod +x mask-ctl-darwin-amd64
 sudo mv mask-ctl-darwin-amd64 /usr/local/bin/mask-ctl
 
 # macOS (Darwin arm64)
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.5/mask-ctl-darwin-arm64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.6/mask-ctl-darwin-arm64
 chmod +x mask-ctl-darwin-arm64
 sudo mv mask-ctl-darwin-arm64 /usr/local/bin/mask-ctl
 
@@ -177,6 +179,11 @@ email = true
 chinese_phone = true
 chinese_id = true
 ```
+
+Privacy switch:
+
+- `enabled = false` (default): proxy only; request bodies are not changed by the privacy filter.
+- `enabled = true`: redact or block locally before forwarding upstream. Configure `[auth].local_api_key` when this is enabled.
 
 #### 4. Start
 
@@ -348,6 +355,8 @@ This project is provided for **educational and research purposes only**.
 
 **Coding Plan Mask** 作为你的 Coding Plan API 和任意 OpenAI 兼容工具之间的桥梁。它将你的请求**伪装**成来自官方支持的 IDE 工具。
 
+项目边界很明确：本地代理、请求来源伪装、OpenAI/Anthropic 协议兼容，以及可选的本地隐私保护。它不是 GUI、云同步、MCP/Skills 面板，也不是多租户计费平台。
+
 ### ✨ 核心功能
 
 | 功能 | 说明 |
@@ -360,7 +369,7 @@ This project is provided for **educational and research purposes only**.
 | 📊 **用量统计** | 实时追踪 Token 消耗，SQLite 持久化存储 |
 | 📝 **可读日志** | 非 debug 模式下输出人类友好的 token 日志 |
 | 🔒 **本地认证** | 用自定义密钥保护你的代理 |
-| 🛡️ **本地隐私过滤** | 可选 EdgeClaw-Mini 风格 S1/S2/S3 策略、脱敏、阻断、full/clean 审计和本地上下文筛选 |
+| 🛡️ **本地隐私过滤** | 默认关闭；开启后在本地执行 S1/S2/S3 策略、脱敏、阻断、full/clean 审计和上下文筛选 |
 | ⚡ **高性能** | Go 语言构建，极致效率 |
 | 🔧 **灵活配置** | 支持 TOML 配置文件、环境变量和自定义 API URL |
 | 🌊 **流式响应** | 实时流式转发响应，智能检测流式请求 |
@@ -374,22 +383,22 @@ This project is provided for **educational and research purposes only**.
 
 ```bash
 # Linux amd64
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.5/mask-ctl-linux-amd64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.6/mask-ctl-linux-amd64
 chmod +x mask-ctl-linux-amd64
 sudo mv mask-ctl-linux-amd64 /usr/local/bin/mask-ctl
 
 # Linux arm64
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.5/mask-ctl-linux-arm64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.6/mask-ctl-linux-arm64
 chmod +x mask-ctl-linux-arm64
 sudo mv mask-ctl-linux-arm64 /usr/local/bin/mask-ctl
 
 # macOS amd64
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.5/mask-ctl-darwin-amd64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.6/mask-ctl-darwin-amd64
 chmod +x mask-ctl-darwin-amd64
 sudo mv mask-ctl-darwin-amd64 /usr/local/bin/mask-ctl
 
 # macOS arm64
-wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.5/mask-ctl-darwin-arm64
+wget https://github.com/systemime/coding-plan-mask/releases/download/v0.8.6/mask-ctl-darwin-arm64
 chmod +x mask-ctl-darwin-arm64
 sudo mv mask-ctl-darwin-arm64 /usr/local/bin/mask-ctl
 ```
@@ -475,6 +484,11 @@ email = true
 chinese_phone = true
 chinese_id = true
 ```
+
+隐私保护开关：
+
+- `enabled = false`（默认）：只做代理和伪装，隐私过滤不会改写请求体。
+- `enabled = true`：转发上游前先在本地脱敏或阻断。开启后请配置 `[auth].local_api_key`。
 
 #### 4. 启动
 

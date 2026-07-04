@@ -82,6 +82,79 @@ func TestBuildHeadersPreservesExistingXAppHeader(t *testing.T) {
 	}
 }
 
+func TestBuildHeadersDisguiseMatrix(t *testing.T) {
+	tests := []struct {
+		name     string
+		setup    func(*config.Config)
+		wantUA   string
+		wantXApp bool
+	}{
+		{
+			name: "claudecode",
+			setup: func(cfg *config.Config) {
+				cfg.DisguiseTool = "claudecode"
+				cfg.ClaudeCodeUserAgent = "claude-test"
+			},
+			wantUA:   "claude-test",
+			wantXApp: true,
+		},
+		{
+			name: "kimicode",
+			setup: func(cfg *config.Config) {
+				cfg.DisguiseTool = "kimicode"
+			},
+			wantUA: "claude-code/0.1.0",
+		},
+		{
+			name: "opencode",
+			setup: func(cfg *config.Config) {
+				cfg.DisguiseTool = "opencode"
+			},
+			wantUA: config.DefaultOpenCodeUserAgent,
+		},
+		{
+			name: "openclaw",
+			setup: func(cfg *config.Config) {
+				cfg.DisguiseTool = "openclaw"
+			},
+			wantUA: config.DefaultOpenClawUserAgent,
+		},
+		{
+			name: "custom",
+			setup: func(cfg *config.Config) {
+				cfg.DisguiseTool = "custom"
+				cfg.CustomUserAgent = "custom-client/1.0"
+			},
+			wantUA: "custom-client/1.0",
+		},
+	}
+
+	provider := &config.ProviderConfig{AuthHeader: "Authorization", AuthPrefix: "Bearer "}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.DefaultConfig()
+			tt.setup(cfg)
+			p := &Proxy{cfg: cfg}
+			headers := p.buildHeaders(provider, "upstream-key", http.Header{
+				"Authorization": []string{"Bearer local-key"},
+			})
+
+			if got := headers.Get("User-Agent"); got != tt.wantUA {
+				t.Fatalf("expected UA %q, got %q", tt.wantUA, got)
+			}
+			if got := headers.Get("Authorization"); got != "Bearer upstream-key" {
+				t.Fatalf("expected upstream auth key only, got %q", got)
+			}
+			if hasXApp := headers.Get("X-App") != ""; hasXApp != tt.wantXApp {
+				t.Fatalf("unexpected X-App presence: %v", hasXApp)
+			}
+			if !tt.wantXApp && headers.Get("x-client-request-id") != "" {
+				t.Fatalf("expected no Claude client request id for %s", tt.name)
+			}
+		})
+	}
+}
+
 func TestBuildHeadersAddsSessionIdAndClientRequestIdForClaudeCode(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.DisguiseTool = "claudecode"
@@ -318,6 +391,136 @@ func TestEstimateOutputTokensFromResponseFallsBackToContent(t *testing.T) {
 	got := estimateOutputTokensFromResponse(respData, nil)
 	if got <= 0 {
 		t.Fatalf("expected fallback output token estimate to be positive, got %d", got)
+	}
+}
+
+func TestForwardOpenAIChatCompletionsDefault(t *testing.T) {
+	store, err := storage.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("create storage: %v", err)
+	}
+	defer store.Close()
+
+	var upstreamPath string
+	var upstreamAuth string
+	var received map[string]interface{}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamPath = r.URL.Path
+		upstreamAuth = r.Header.Get("Authorization")
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Fatalf("decode upstream body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-1","choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"completion_tokens":1}}`))
+	}))
+	defer upstream.Close()
+
+	cfg := config.DefaultConfig()
+	cfg.Provider = "custom"
+	cfg.APIKey = "upstream-test-key"
+	cfg.LocalAPIKey = "local-test-key"
+	cfg.CustomBaseURL = upstream.URL
+	cfg.CustomCodingURL = upstream.URL
+
+	p := New(cfg, zap.NewNop(), store, nil)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"glm-5","messages":[{"role":"user","content":"ping"}]}`))
+	req.Header.Set("Authorization", "Bearer local-test-key")
+	rec := httptest.NewRecorder()
+
+	p.Forward(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if upstreamPath != "/v1/chat/completions" {
+		t.Fatalf("expected default OpenAI path, got %q", upstreamPath)
+	}
+	if upstreamAuth != "Bearer upstream-test-key" {
+		t.Fatalf("expected upstream key, got %q", upstreamAuth)
+	}
+	messages := received["messages"].([]interface{})
+	if messages[0].(map[string]interface{})["content"] != "ping" {
+		t.Fatalf("expected body to pass through, got %#v", received)
+	}
+	if !strings.Contains(rec.Body.String(), `"chatcmpl-1"`) {
+		t.Fatalf("expected OpenAI response to pass through, got %s", rec.Body.String())
+	}
+}
+
+func TestForwardOpenAIStreamResponse(t *testing.T) {
+	store, err := storage.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("create storage: %v", err)
+	}
+	defer store.Close()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Fatalf("unexpected upstream path %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer upstream.Close()
+
+	cfg := config.DefaultConfig()
+	cfg.Provider = "custom"
+	cfg.APIKey = "upstream-test-key"
+	cfg.CustomBaseURL = upstream.URL
+	cfg.CustomCodingURL = upstream.URL
+
+	p := New(cfg, zap.NewNop(), store, nil)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"glm-5","stream":true,"messages":[{"role":"user","content":"ping"}]}`))
+	rec := httptest.NewRecorder()
+
+	p.Forward(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "data: ") || !strings.Contains(body, "[DONE]") {
+		t.Fatalf("expected OpenAI SSE passthrough, got %s", body)
+	}
+}
+
+func TestForwardDoesNotRewriteBodyWhenSecurityDisabled(t *testing.T) {
+	store, err := storage.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("create storage: %v", err)
+	}
+	defer store.Close()
+
+	var received map[string]interface{}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Fatalf("decode upstream body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}]}`))
+	}))
+	defer upstream.Close()
+
+	cfg := config.DefaultConfig()
+	cfg.Provider = "custom"
+	cfg.APIKey = "upstream-test-key"
+	cfg.CustomBaseURL = upstream.URL
+	cfg.CustomCodingURL = upstream.URL
+
+	p := New(cfg, zap.NewNop(), store, security.NewService(security.Settings{Enabled: false, AuditDir: t.TempDir()}, zap.NewNop()))
+	req := httptest.NewRequest(http.MethodPost, "/chat/completions", strings.NewReader(`{"messages":[{"role":"user","content":"my password is abc123"}]}`))
+	rec := httptest.NewRecorder()
+
+	p.Forward(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	content := received["messages"].([]interface{})[0].(map[string]interface{})["content"].(string)
+	if content != "my password is abc123" {
+		t.Fatalf("expected disabled security to leave body unchanged, got %q", content)
 	}
 }
 
@@ -1019,6 +1222,77 @@ func TestForwardConvertsAnthropicMessagesToOpenAIChat(t *testing.T) {
 	}
 	if body["stop_reason"] != "end_turn" {
 		t.Fatalf("expected stop_reason=end_turn, got %v", body["stop_reason"])
+	}
+}
+
+func TestForwardAnthropicConversionRunsPrivacyFilter(t *testing.T) {
+	store, err := storage.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("create storage: %v", err)
+	}
+	defer store.Close()
+
+	var received map[string]interface{}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("expected /chat/completions, got %q", r.URL.Path)
+		}
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Fatalf("decode upstream body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-1","model":"glm-5","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"completion_tokens":1}}`))
+	}))
+	defer upstream.Close()
+
+	cfg := config.DefaultConfig()
+	cfg.Provider = "custom"
+	cfg.APIKey = "upstream-test-key"
+	cfg.LocalAPIKey = "sk-test"
+	cfg.CustomBaseURL = upstream.URL
+	cfg.CustomCodingURL = upstream.URL
+	cfg.UseAnthropic = true
+	cfg.Security.Enabled = true
+	cfg.Security.HandlingS2 = "redact"
+	cfg.Security.HandlingS3 = "block"
+
+	securitySvc := security.NewService(security.Settings{
+		Enabled:         true,
+		AuditDir:        t.TempDir(),
+		DefaultTrack:    "clean",
+		DefaultTopK:     5,
+		HandlingS2:      "redact",
+		HandlingS3:      "block",
+		PlaceholderS3:   "[PRIVATE]",
+		SessionHeader:   "X-Session-Id",
+		MaxAuditEntries: 100,
+	}, zap.NewNop())
+
+	p := New(cfg, zap.NewNop(), store, securitySvc)
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{
+		"model":"claude-3-5-sonnet",
+		"max_tokens":64,
+		"messages":[{"role":"user","content":[{"type":"text","text":"my password is abc123"}]}]
+	}`))
+	req.Header.Set("Authorization", "Bearer sk-test")
+	rec := httptest.NewRecorder()
+
+	p.Forward(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	messages := received["messages"].([]interface{})
+	if got := messages[0].(map[string]interface{})["content"]; got != "my password is [REDACTED:PASSWORD]" {
+		t.Fatalf("expected converted OpenAI body to be redacted, got %#v", got)
+	}
+	var body map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["type"] != "message" {
+		t.Fatalf("expected Anthropic response after privacy filtering, got %#v", body)
 	}
 }
 

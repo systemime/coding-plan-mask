@@ -228,6 +228,24 @@ Privacy filtering is a low-CPU local rules baseline, not a full DLP or ML PII de
 
 When `use_anthropic=true`, Claude-style clients can call the local proxy with Anthropic Messages format while the upstream remains OpenAI-compatible. Requests, tools, tool results, normal responses, and SSE streams are translated both ways for that path.
 
+Minimal client examples:
+
+```json
+// OpenAI-compatible client
+{
+  "base_url": "http://127.0.0.1:8787/v1",
+  "api_key": "sk-local-secret",
+  "model": "glm-4-flash"
+}
+```
+
+```bash
+# Claude/Anthropic-style client
+# config.toml: [api] use_anthropic = true
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8787
+export ANTHROPIC_API_KEY=sk-local-secret
+```
+
 ### 🎭 Tool Masking Options
 
 ```toml
@@ -545,6 +563,24 @@ sudo systemctl start coding-plan-mask
 | OpenAI 客户端 → 原生 Anthropic/Claude 上游 | OpenAI `/v1/chat/completions` | Anthropic `/v1/messages` | 暂未实现 |
 
 也就是说：Claude/Anthropic 协议的本地客户端可以接入 OpenAI 兼容上游；请求、工具调用、工具结果、普通响应和 SSE 流都会在 `/v1/messages` 这条路径上转换。反向的“OpenAI 本地协议转原生 Claude/Anthropic 上游”目前没有做；如果上游本身提供 OpenAI 兼容接口，直接走默认 OpenAI 路径即可。
+
+最小客户端配置示例：
+
+```json
+// OpenAI 兼容客户端
+{
+  "base_url": "http://127.0.0.1:8787/v1",
+  "api_key": "sk-local-secret",
+  "model": "glm-4-flash"
+}
+```
+
+```bash
+# Claude/Anthropic 风格客户端
+# config.toml: [api] use_anthropic = true
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8787
+export ANTHROPIC_API_KEY=sk-local-secret
+```
 
 ### 🎭 工具伪装选项
 

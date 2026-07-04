@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -14,11 +15,6 @@ import (
 	"coding-plan-mask/internal/server"
 	"coding-plan-mask/internal/storage"
 
-	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -52,6 +48,9 @@ func main() {
 			return
 		case "history":
 			showHistory(os.Args[2:])
+			return
+		case "doctor":
+			runDoctor(os.Args[2:])
 			return
 		case "help", "-h", "--help":
 			printHelp()
@@ -206,12 +205,16 @@ func showConnection(args []string) {
 		os.Exit(1)
 	}
 
-	baseURL := fmt.Sprintf("http://%s:%d/v1", cfg.ListenHost, cfg.ListenPort)
+	openAIBaseURL := fmt.Sprintf("http://%s:%d/v1", cfg.ListenHost, cfg.ListenPort)
+	anthropicBaseURL := fmt.Sprintf("http://%s:%d", cfg.ListenHost, cfg.ListenPort)
 
 	if *jsonOutput {
-		output := map[string]string{
-			"base_url": baseURL,
-			"api_key":  cfg.LocalAPIKey,
+		output := map[string]interface{}{
+			"base_url":           openAIBaseURL,
+			"openai_base_url":    openAIBaseURL,
+			"anthropic_base_url": anthropicBaseURL,
+			"api_key":            cfg.LocalAPIKey,
+			"api_key_configured": cfg.LocalAPIKey != "",
 		}
 		json.NewEncoder(os.Stdout).Encode(output)
 	} else {
@@ -219,30 +222,147 @@ func showConnection(args []string) {
 		fmt.Println("╔════════════════════════════════════════════════════════════╗")
 		fmt.Println("║              本地连接信息 (Local Connection)                ║")
 		fmt.Println("╠════════════════════════════════════════════════════════════╣")
-		fmt.Printf("║  Base URL:  %-45s ║\n", baseURL)
+		fmt.Printf("║  OpenAI URL:    %-41s ║\n", openAIBaseURL)
+		fmt.Printf("║  Anthropic URL: %-41s ║\n", anthropicBaseURL)
 		if cfg.LocalAPIKey != "" {
-			fmt.Printf("║  API Key:   %-45s ║\n", cfg.LocalAPIKey)
+			fmt.Printf("║  API Key:       %-41s ║\n", maskSecret(cfg.LocalAPIKey))
 		} else {
-			fmt.Printf("║  API Key:   %-45s ║\n", "(未设置，无需认证)")
+			fmt.Printf("║  API Key:       %-41s ║\n", "(未设置，无需认证)")
 		}
 		fmt.Println("╚════════════════════════════════════════════════════════════╝")
 		fmt.Println()
-		fmt.Println("客户端配置示例:")
+		fmt.Println("OpenAI-compatible 客户端示例:")
 		fmt.Println("```json")
 		if cfg.LocalAPIKey != "" {
 			fmt.Printf(`{
     "base_url": "%s",
-    "api_key": "%s",
+    "api_key": "<local_api_key>",
     "model": "glm-4-flash"
-}`, baseURL, cfg.LocalAPIKey)
+}`, openAIBaseURL)
 		} else {
 			fmt.Printf(`{
     "base_url": "%s",
     "model": "glm-4-flash"
-}`, baseURL)
+}`, openAIBaseURL)
 		}
 		fmt.Println("\n```")
+		fmt.Println()
+		fmt.Println("Claude/Anthropic-compatible 客户端：")
+		fmt.Printf("ANTHROPIC_BASE_URL=%s\n", anthropicBaseURL)
+		if cfg.LocalAPIKey != "" {
+			fmt.Println("ANTHROPIC_AUTH_TOKEN=<local_api_key>")
+			fmt.Println("实际 Key 可用 `mask-ctl show --json` 给脚本读取。")
+		}
 	}
+}
+
+type doctorCheck struct {
+	Name    string `json:"name"`
+	Status  string `json:"status"`
+	Message string `json:"message"`
+}
+
+func runDoctor(args []string) {
+	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
+	configPath := fs.String("config", "", "配置文件路径")
+	jsonOutput := fs.Bool("json", false, "JSON 格式输出")
+	_ = fs.Parse(args)
+
+	cfg, err := config.LoadConfig(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "加载配置失败: %v\n", err)
+		os.Exit(1)
+	}
+
+	checks := collectDoctorChecks(cfg)
+	if *jsonOutput {
+		_ = json.NewEncoder(os.Stdout).Encode(map[string]interface{}{
+			"ok":     !hasDoctorError(checks),
+			"checks": checks,
+		})
+	} else {
+		fmt.Println("Coding Plan Mask 配置检查")
+		for _, check := range checks {
+			fmt.Printf("[%s] %s: %s\n", strings.ToUpper(check.Status), check.Name, check.Message)
+		}
+	}
+	if hasDoctorError(checks) {
+		os.Exit(1)
+	}
+}
+
+func collectDoctorChecks(cfg *config.Config) []doctorCheck {
+	var checks []doctorCheck
+	add := func(status, name, message string) {
+		checks = append(checks, doctorCheck{Name: name, Status: status, Message: message})
+	}
+
+	provider, err := cfg.GetProviderConfig()
+	if err != nil {
+		add("error", "provider", err.Error())
+	} else {
+		add("ok", "provider", fmt.Sprintf("%s (%s)", cfg.Provider, provider.Name))
+		targetURL := provider.CodingBaseURL
+		if !cfg.UseCodingEndpoint {
+			targetURL = provider.GeneralBaseURL
+		}
+		if strings.TrimSpace(targetURL) == "" {
+			add("error", "upstream_url", "上游 URL 为空；custom provider 需要配置 [api].base_url 或 coding_url")
+		} else {
+			add("ok", "upstream_url", targetURL)
+		}
+		if strings.TrimSpace(provider.AuthHeader) == "" {
+			add("error", "auth_header", "上游认证头为空")
+		} else {
+			add("ok", "auth_header", provider.AuthHeader)
+		}
+	}
+
+	if strings.TrimSpace(cfg.APIKey) == "" {
+		add("error", "api_key", "未配置 Coding Plan API Key")
+	} else {
+		add("ok", "api_key", "已配置")
+	}
+	if strings.TrimSpace(cfg.LocalAPIKey) == "" {
+		if cfg.Security.Enabled {
+			add("error", "local_api_key", "启用隐私过滤时必须配置本地 API Key")
+		} else {
+			add("warn", "local_api_key", "未配置；本地代理将允许任意客户端连接")
+		}
+	} else {
+		add("ok", "local_api_key", "已配置")
+	}
+
+	add("ok", "listen", fmt.Sprintf("http://%s:%d", cfg.ListenHost, cfg.ListenPort))
+	add("ok", "openai_base_url", fmt.Sprintf("http://%s:%d/v1", cfg.ListenHost, cfg.ListenPort))
+	add("ok", "anthropic_base_url", fmt.Sprintf("http://%s:%d", cfg.ListenHost, cfg.ListenPort))
+	if cfg.UseAnthropic {
+		add("ok", "anthropic_bridge", "/v1/messages 会转换为 OpenAI Chat Completions")
+	} else {
+		add("info", "anthropic_bridge", "未启用；如需 Claude 风格客户端请设置 use_anthropic=true")
+	}
+	if cfg.Security.Enabled {
+		add("ok", "privacy", "已启用本地隐私过滤")
+	} else {
+		add("info", "privacy", "未启用本地隐私过滤")
+	}
+	return checks
+}
+
+func hasDoctorError(checks []doctorCheck) bool {
+	for _, check := range checks {
+		if check.Status == "error" {
+			return true
+		}
+	}
+	return false
+}
+
+func maskSecret(value string) string {
+	if len(value) <= 8 {
+		return "****"
+	}
+	return value[:4] + "****" + value[len(value)-4:]
 }
 
 // printHelp 打印帮助信息
@@ -255,11 +375,13 @@ func printHelp() {
   %s show --json      JSON 格式输出连接信息
   %s stats            显示 Token 使用统计
   %s history          查看转发历史记录
+  %s doctor           检查本地配置
 
 子命令:
   show, info, connection    显示本地连接地址和 API Key
   stats                      显示 Token 使用统计
-  history                    交互式查看转发历史记录
+  history                    查看转发历史记录
+  doctor                     检查本地配置
 
 选项:
   -config string         配置文件路径
@@ -288,6 +410,11 @@ User-Agent 来源说明:
   opencode:   opencode/<version> ai-sdk/... runtime/bun/... - 可通过 opencode_user_agent 覆盖
   openclaw:   OpenClaw-Gateway/1.0 - OpenClaw 兼容默认值，可通过 openclaw_user_agent 覆盖
 
+常用环境变量:
+  API_KEY, LOCAL_API_KEY, PROVIDER, HOST, PORT, DEBUG
+  USE_ANTHROPIC, SECURITY_ENABLED, SECURITY_AUDIT_DIR
+  DISGUISE_TOOL, CLAUDE_CODE_USER_AGENT, OPENCODE_USER_AGENT, OPENCLAW_USER_AGENT
+
 示例:
   # 启动服务
   %s -api-key sk-xxx -local-api-key sk-local-xxx
@@ -300,7 +427,10 @@ User-Agent 来源说明:
 
   # 查看转发历史
   %s history
-`, version, os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0])
+
+  # 检查配置
+  %s doctor
+`, version, os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0])
 }
 
 // initLogger 初始化日志
@@ -400,332 +530,46 @@ func padRight(s string, length int) string {
 	return s + strings.Repeat(" ", length-len(s))
 }
 
-// ========== History TUI ==========
-
-// history keybindings
-type historyKeyMap struct {
-	Up       key.Binding
-	Down     key.Binding
-	Enter    key.Binding
-	Esc      key.Binding
-	Quit     key.Binding
-	Help     key.Binding
-}
-
-var historyKeys = historyKeyMap{
-	Up: key.NewBinding(
-		key.WithKeys("up", "k"),
-		key.WithHelp("↑/k", "上移"),
-	),
-	Down: key.NewBinding(
-		key.WithKeys("down", "j"),
-		key.WithHelp("↓/j", "下移"),
-	),
-	Enter: key.NewBinding(
-		key.WithKeys("enter"),
-		key.WithHelp("enter", "查看详情"),
-	),
-	Esc: key.NewBinding(
-		key.WithKeys("esc"),
-		key.WithHelp("esc", "返回列表"),
-	),
-	Quit: key.NewBinding(
-		key.WithKeys("q", "ctrl+c"),
-		key.WithHelp("q", "退出"),
-	),
-	Help: key.NewBinding(
-		key.WithKeys("?"),
-		key.WithHelp("?", "帮助"),
-	),
-}
-
-func (k historyKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Down, k.Enter, k.Esc, k.Quit}
-}
-
-func (k historyKeyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{
-		{k.Up, k.Down},
-		{k.Enter, k.Esc},
-		{k.Quit, k.Help},
-	}
-}
-
-// historyModel TUI model
-type historyModel struct {
-	records        []storage.RequestRecordLite
-	selected       int
-	store          *storage.Storage
-	viewMode       bool          // 是否在详情查看模式
-	detailRecord   *storage.RequestRecord
-	viewport       viewport.Model
-	help           help.Model
-	showHelp       bool
-	ready          bool
-	width, height  int
-	err            error
-}
-
-func newHistoryModel(records []storage.RequestRecordLite, store *storage.Storage) historyModel {
-	return historyModel{
-		records:  records,
-		store:    store,
-		help:     help.New(),
-		showHelp: false,
-	}
-}
-
-func (m historyModel) Init() tea.Cmd {
-	return nil
-}
-
-func (m historyModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmds []tea.Cmd
-
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		m.help.Width = msg.Width
-		m.ready = true
-		if m.viewMode {
-			m.viewport.Width = msg.Width - 4
-			m.viewport.Height = msg.Height - 6
-		}
-		return m, nil
-
-	case tea.KeyMsg:
-		if m.viewMode {
-			// 详情模式
-			switch {
-			case key.Matches(msg, historyKeys.Esc):
-				m.viewMode = false
-				m.detailRecord = nil
-				return m, nil
-			case key.Matches(msg, historyKeys.Quit):
-				return m, tea.Quit
-			}
-			var cmd tea.Cmd
-			m.viewport, cmd = m.viewport.Update(msg)
-			return m, cmd
-		}
-
-		// 列表模式
-		switch {
-		case key.Matches(msg, historyKeys.Quit):
-			return m, tea.Quit
-		case key.Matches(msg, historyKeys.Up):
-			if m.selected > 0 {
-				m.selected--
-			}
-		case key.Matches(msg, historyKeys.Down):
-			if m.selected < len(m.records)-1 {
-				m.selected++
-			}
-		case key.Matches(msg, historyKeys.Enter):
-			if len(m.records) > 0 && m.selected < len(m.records) {
-				record := m.records[m.selected]
-				detail, err := m.store.GetRequestDetail(record.ID)
-				if err != nil {
-					m.err = err
-					return m, nil
-				}
-				m.detailRecord = detail
-				m.viewMode = true
-				content := formatDetailContent(detail)
-				m.viewport = viewport.New(m.width-4, m.height-6)
-				m.viewport.SetContent(content)
-			}
-		case key.Matches(msg, historyKeys.Help):
-			m.showHelp = !m.showHelp
-		}
-	}
-
-	return m, tea.Batch(cmds...)
-}
-
-var (
-	titleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("15")).
-			Background(lipgloss.Color("62")).
-			Padding(0, 1)
-
-	selectedStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("15")).
-			Background(lipgloss.Color("62"))
-
-	normalStyle = lipgloss.NewStyle()
-
-	headerStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("86"))
-
-	detailStyle = lipgloss.NewStyle().
-			Padding(0, 1)
-)
-
-func (m historyModel) View() string {
-	if !m.ready {
-		return "加载中..."
-	}
-
-	if m.err != nil {
-		return fmt.Sprintf("错误: %v", m.err)
-	}
-
-	if m.viewMode && m.detailRecord != nil {
-		// 详情模式
-		title := titleStyle.Render(fmt.Sprintf(" 请求详情 #%d ", m.detailRecord.ID))
-		helpBar := lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("按 Esc 返回列表 | q 退出")
-		return fmt.Sprintf("%s\n%s\n\n%s", title, m.viewport.View(), helpBar)
-	}
-
-	// 列表模式
-	var b strings.Builder
-
-	// 标题
-	title := titleStyle.Render(" 转发历史记录 ")
-	b.WriteString(title + "\n\n")
-
-	// 表头
-	header := fmt.Sprintf("  %-6s %-20s %-18s %-12s %-30s %-10s",
-		"ID", "时间", "模型", "供应商", "路径", "状态")
-	b.WriteString(headerStyle.Render(header) + "\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("238")).Render(strings.Repeat("─", min(m.width, 120))) + "\n")
-
-	// 计算可见区域
-	visibleStart := max(0, m.selected-10)
-	visibleEnd := min(len(m.records), visibleStart+20)
-
-	for i := visibleStart; i < visibleEnd; i++ {
-		r := m.records[i]
-		timeStr := r.Timestamp.Format("2006-01-02 15:04:05")
-		model := truncate(r.Model, 16)
-		provider := truncate(r.Provider, 10)
-		path := truncate(r.Path, 28)
-
-		line := fmt.Sprintf("  %-6d %-20s %-18s %-12s %-30s %-10d",
-			r.ID, timeStr, model, provider, path, r.StatusCode)
-
-		if i == m.selected {
-			b.WriteString(selectedStyle.Render(line) + "\n")
-		} else {
-			b.WriteString(normalStyle.Render(line) + "\n")
-		}
-	}
-
-	// 底部状态
-	if len(m.records) == 0 {
-		b.WriteString("\n  暂无历史记录\n")
-	} else {
-		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("238")).Render(strings.Repeat("─", min(m.width, 120))) + "\n")
-		status := fmt.Sprintf(" %d/%d 条记录 | ↑/↓ 移动 | Enter 查看详情 | q 退出 ",
-			m.selected+1, len(m.records))
-		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(status))
-	}
-
-	return b.String()
-}
-
 func formatDetailContent(r *storage.RequestRecord) string {
 	var b strings.Builder
-
-	b.WriteString(lipgloss.NewStyle().Bold(true).Render("═══════════════════════════════════════════════════════════════") + "\n\n")
-
-	// 基本信息
-	b.WriteString(fmt.Sprintf("  ID:          %d\n", r.ID))
-	b.WriteString(fmt.Sprintf("  时间:        %s\n", r.Timestamp.Format("2006-01-02 15:04:05.000")))
-	b.WriteString(fmt.Sprintf("  供应商:      %s\n", r.Provider))
-	b.WriteString(fmt.Sprintf("  模型:        %s\n", r.Model))
-	b.WriteString(fmt.Sprintf("  方法:        %s\n", r.Method))
-	b.WriteString(fmt.Sprintf("  路径:        %s\n", r.Path))
-	b.WriteString(fmt.Sprintf("  客户端IP:    %s\n", r.ClientIP))
-	b.WriteString(fmt.Sprintf("  状态码:      %d\n", r.StatusCode))
-	b.WriteString(fmt.Sprintf("  耗时:        %.2f ms\n", r.Duration))
-	b.WriteString(fmt.Sprintf("  输入Token:   %d\n", r.InputTokens))
-	b.WriteString(fmt.Sprintf("  输出Token:   %d\n", r.OutputTokens))
-	b.WriteString(fmt.Sprintf("  总Token:     %d\n", r.TotalTokens))
-	b.WriteString(fmt.Sprintf("  流式:        %v\n", r.Stream))
-	b.WriteString(fmt.Sprintf("  成功:        %v\n", r.Success))
+	b.WriteString(fmt.Sprintf("ID:          %d\n", r.ID))
+	b.WriteString(fmt.Sprintf("时间:        %s\n", r.Timestamp.Format("2006-01-02 15:04:05.000")))
+	b.WriteString(fmt.Sprintf("供应商:      %s\n", r.Provider))
+	b.WriteString(fmt.Sprintf("模型:        %s\n", r.Model))
+	b.WriteString(fmt.Sprintf("方法:        %s\n", r.Method))
+	b.WriteString(fmt.Sprintf("路径:        %s\n", r.Path))
+	b.WriteString(fmt.Sprintf("客户端IP:    %s\n", r.ClientIP))
+	b.WriteString(fmt.Sprintf("状态码:      %d\n", r.StatusCode))
+	b.WriteString(fmt.Sprintf("耗时:        %.2f ms\n", r.Duration))
+	b.WriteString(fmt.Sprintf("输入Token:   %d\n", r.InputTokens))
+	b.WriteString(fmt.Sprintf("输出Token:   %d\n", r.OutputTokens))
+	b.WriteString(fmt.Sprintf("总Token:     %d\n", r.TotalTokens))
+	b.WriteString(fmt.Sprintf("流式:        %v\n", r.Stream))
+	b.WriteString(fmt.Sprintf("成功:        %v\n", r.Success))
 	if r.ErrorMsg != "" {
-		b.WriteString(fmt.Sprintf("  错误信息:    %s\n", r.ErrorMsg))
+		b.WriteString(fmt.Sprintf("错误信息:    %s\n", r.ErrorMsg))
 	}
-
-	b.WriteString("\n" + lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("86")).Render("── 请求Body ──") + "\n\n")
+	b.WriteString("\n── 请求Body ──\n")
 	if r.RequestBody != "" {
 		b.WriteString(indentJSON(r.RequestBody))
 	} else {
-		b.WriteString("  (空)\n")
+		b.WriteString("(空)\n")
 	}
-
-	b.WriteString("\n" + lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("86")).Render("── 响应Body ──") + "\n\n")
+	b.WriteString("\n── 响应Body ──\n")
 	if r.ResponseBody != "" {
 		b.WriteString(indentJSON(r.ResponseBody))
 	} else {
-		b.WriteString("  (空)\n")
+		b.WriteString("(空)\n")
 	}
-
-	b.WriteString("\n" + lipgloss.NewStyle().Bold(true).Render("═══════════════════════════════════════════════════════════════") + "\n")
-
 	return b.String()
 }
 
 func indentJSON(s string) string {
-	var buf strings.Builder
-	indent := 0
-	inString := false
-	escaped := false
-
-	for _, c := range s {
-		if escaped {
-			buf.WriteRune(c)
-			escaped = false
-			continue
-		}
-
-		switch c {
-		case '\\':
-			buf.WriteRune(c)
-			escaped = true
-		case '"':
-			buf.WriteRune(c)
-			inString = !inString
-		case '{', '[':
-			buf.WriteRune(c)
-			if !inString {
-				buf.WriteRune('\n')
-				indent++
-				buf.WriteString(strings.Repeat("  ", indent))
-			}
-		case '}', ']':
-			if !inString {
-				buf.WriteRune('\n')
-				indent--
-				buf.WriteString(strings.Repeat("  ", indent))
-			}
-			buf.WriteRune(c)
-		case ',':
-			buf.WriteRune(c)
-			if !inString {
-				buf.WriteRune('\n')
-				buf.WriteString(strings.Repeat("  ", indent))
-			}
-		case ':':
-			buf.WriteRune(c)
-			if !inString {
-				buf.WriteRune(' ')
-			}
-		case ' ', '\t', '\n', '\r':
-			if inString {
-				buf.WriteRune(c)
-			}
-		default:
-			buf.WriteRune(c)
-		}
+	var out bytes.Buffer
+	if err := json.Indent(&out, []byte(s), "", "  "); err != nil {
+		return s + "\n"
 	}
-
-	return "  " + strings.ReplaceAll(buf.String(), "\n", "\n  ")
+	return out.String() + "\n"
 }
 
 func truncate(s string, maxLen int) string {
@@ -735,24 +579,12 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen-3] + "..."
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 // showHistory 显示历史记录
 func showHistory(args []string) {
 	fs := flag.NewFlagSet("history", flag.ExitOnError)
 	configPath := fs.String("config", "", "配置文件路径")
+	limit := fs.Int("limit", 20, "显示最近 N 条记录")
+	detailID := fs.Int64("id", 0, "显示指定请求详情")
 	_ = fs.Parse(args)
 
 	// 确定数据目录
@@ -770,7 +602,6 @@ func showHistory(args []string) {
 		return
 	}
 
-	// 打开存储
 	store, err := storage.New(dataDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "打开存储失败: %v\n", err)
@@ -778,23 +609,40 @@ func showHistory(args []string) {
 	}
 	defer store.Close()
 
-	// 获取所有记录
+	if *detailID > 0 {
+		detail, err := store.GetRequestDetail(*detailID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "获取历史详情失败: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Print(formatDetailContent(detail))
+		return
+	}
+
 	records, err := store.GetAllRequestsLite()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "获取历史记录失败: %v\n", err)
 		os.Exit(1)
 	}
-
 	if len(records) == 0 {
-		fmt.Println("\n暂无历史记录")
+		fmt.Println("暂无历史记录")
 		return
 	}
-
-	// 启动TUI
-	m := newHistoryModel(records, store)
-	p := tea.NewProgram(m, tea.WithAltScreen())
-	if _, err := p.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "启动TUI失败: %v\n", err)
-		os.Exit(1)
+	if *limit <= 0 || *limit > len(records) {
+		*limit = len(records)
 	}
+
+	fmt.Printf("%-6s %-19s %-16s %-10s %-28s %-6s %-8s\n", "ID", "时间", "模型", "供应商", "路径", "状态", "Tokens")
+	for _, r := range records[:*limit] {
+		fmt.Printf("%-6d %-19s %-16s %-10s %-28s %-6d %-8d\n",
+			r.ID,
+			r.Timestamp.Format("2006-01-02 15:04:05"),
+			truncate(r.Model, 16),
+			truncate(r.Provider, 10),
+			truncate(r.Path, 28),
+			r.StatusCode,
+			r.TotalTokens,
+		)
+	}
+	fmt.Println("\n详情: mask-ctl history -id <ID>")
 }

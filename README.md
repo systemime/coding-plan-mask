@@ -260,8 +260,14 @@ mask-ctl info
 # View token usage statistics
 mask-ctl stats
 
-# View forwarding history (interactive TUI)
+# Check local configuration
+mask-ctl doctor
+
+# View forwarding history
 mask-ctl history
+
+# View one request detail
+mask-ctl history -id 123
 
 # View help
 mask-ctl help
@@ -270,13 +276,12 @@ mask-ctl help
 curl http://127.0.0.1:8787/stats
 ```
 
-#### History Command
+#### Connection & Check Commands
 
-The `history` command provides an interactive terminal UI for browsing forwarding records:
-
-- **Navigation**: Use `↑/↓` or `j/k` to move through records
-- **View Details**: Press `Enter` to expand full request/response details including body
-- **Exit**: Press `q` to quit, `Esc` to return from detail view
+- `mask-ctl show` prints OpenAI-compatible and Anthropic-compatible local URLs.
+- `mask-ctl show --json` keeps machine-readable connection output for scripts.
+- `mask-ctl doctor` checks required keys, provider routing, local auth, Anthropic bridge, and privacy mode.
+- `mask-ctl history -id <ID>` prints one full request/response record.
 
 ### 🔧 Environment Variables
 
@@ -537,8 +542,14 @@ mask-ctl info
 # 查看 Token 使用统计
 mask-ctl stats
 
-# 查看转发历史（交互式 TUI）
+# 检查本地配置
+mask-ctl doctor
+
+# 查看转发历史
 mask-ctl history
+
+# 查看单条请求详情
+mask-ctl history -id 123
 
 # 查看帮助
 mask-ctl help
@@ -547,13 +558,12 @@ mask-ctl help
 curl http://127.0.0.1:8787/stats
 ```
 
-#### History 命令
+#### 连接与检查命令
 
-`history` 命令提供交互式终端界面浏览转发记录：
-
-- **导航**：使用 `↑/↓` 或 `j/k` 在记录间移动
-- **查看详情**：按 `Enter` 展开完整的请求/响应详情，包括 body
-- **退出**：按 `q` 退出，`Esc` 从详情视图返回
+- `mask-ctl show` 输出 OpenAI 兼容和 Anthropic 兼容本地地址。
+- `mask-ctl show --json` 保持脚本可读的连接信息。
+- `mask-ctl doctor` 检查必要 Key、服务商路由、本地认证、Anthropic 转换和隐私模式。
+- `mask-ctl history -id <ID>` 输出单条完整请求/响应记录。
 
 ### 🔧 环境变量配置
 

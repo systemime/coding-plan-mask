@@ -148,7 +148,7 @@ local_api_key = "sk-local-secret"   # Key for your tools to use
 [endpoint]
 use_coding_endpoint = true
 disguise_tool = "claudecode"        # Mask as Claude Code-style CLI traffic
-claude_code_user_agent = "claude-cli/2.1.76 (external, cli)"
+claude_code_user_agent = "claude-cli/2.1.88 (external, cli)"
 
 [api]
 # Optional: Remove version prefix (e.g., /v1) from request path when forwarding
@@ -160,9 +160,9 @@ remove_version_path = false
 mock_models = false
 # Mock /models response content (JSON string)
 mock_models_resp = '{"object":"list","data":[{"id":"gpt-4","object":"model","owned_by":"organization"}]}'
-# Anthropic format compatibility mode (default: false)
-# Converts Anthropic /v1/messages to OpenAI Chat Completions and fixes JSON Schema nulls
-# Useful when Claude-style clients connect to OpenAI-compatible upstreams
+# Anthropic/Claude client compatibility mode (default: false)
+# Local Anthropic /v1/messages -> upstream OpenAI-compatible /chat/completions
+# Also converts upstream OpenAI JSON/SSE responses back to Anthropic format
 # Built-in providers map claude-* model names to their preferred coding model
 use_anthropic = false
 
@@ -213,13 +213,28 @@ In non-debug mode, startup keeps the banner output and proxy activity is shown i
 
 Privacy filtering is a low-CPU local rules baseline, not a full DLP or ML PII detector. Extend `[security.rules]` for project-specific secrets.
 
+### 🔁 Protocol Compatibility
+
+`disguise_tool` and `use_anthropic` do different things:
+
+- `disguise_tool` changes outbound headers/User-Agent so the upstream sees a supported coding client.
+- `use_anthropic` changes the local API protocol accepted by this proxy.
+
+| Local client sends | Local URL/path | Upstream request | Status |
+|--------------------|----------------|------------------|--------|
+| OpenAI Chat Completions | `http://127.0.0.1:8787/v1/chat/completions` | OpenAI-compatible path/body | Default |
+| Anthropic Messages / Claude-style | `http://127.0.0.1:8787/v1/messages` with `use_anthropic=true` | OpenAI-compatible `/chat/completions` | Supported |
+| OpenAI client → native Anthropic/Claude upstream | OpenAI `/v1/chat/completions` | Anthropic `/v1/messages` | Not implemented |
+
+When `use_anthropic=true`, Claude-style clients can call the local proxy with Anthropic Messages format while the upstream remains OpenAI-compatible. Requests, tools, tool results, normal responses, and SSE streams are translated both ways for that path.
+
 ### 🎭 Tool Masking Options
 
 ```toml
 [endpoint]
 # Mask as officially supported tools
 disguise_tool = "claudecode"  # Claude Code-style CLI traffic
-# claude_code_user_agent = "claude-cli/2.1.76 (external, cli)"
+# claude_code_user_agent = "claude-cli/2.1.88 (external, cli)"
 # disguise_tool = "kimicode"    # Kimi Code API subscription auth format
 # disguise_tool = "opencode"    # Legacy OpenCode disguise id
 # opencode_user_agent = "opencode/1.2.27 ai-sdk/provider-utils/3.0.20 runtime/bun/1.3.10"
@@ -231,7 +246,7 @@ disguise_tool = "claudecode"  # Claude Code-style CLI traffic
 
 | Tool | Identifier | User-Agent | Description |
 |------|------------|------------|-------------|
-| **Claude Code** | `claudecode` | `claude-cli/2.1.76 (external, cli)` | Current default Claude CLI-style UA, configurable via `claude_code_user_agent` |
+| **Claude Code** | `claudecode` | `claude-cli/2.1.88 (external, cli)` | Current default Claude CLI-style UA, configurable via `claude_code_user_agent` |
 | **Kimi Code** | `kimicode` | `claude-code/0.1.0` | Kimi Code API subscription auth format |
 | **OpenCode** | `opencode` | `opencode/1.2.27 ai-sdk/provider-utils/3.0.20 runtime/bun/1.3.10` | Legacy disguise id with default UA updated from local capture report |
 | **OpenClaw** | `openclaw` | `OpenClaw-Gateway/1.0` | Compatibility default, configurable via `openclaw_user_agent` |
@@ -452,7 +467,7 @@ local_api_key = "sk-local-secret"   # 你的工具使用的密钥
 [endpoint]
 use_coding_endpoint = true
 disguise_tool = "claudecode"        # 伪装为 Claude Code 风格 CLI 请求
-claude_code_user_agent = "claude-cli/2.1.76 (external, cli)"
+claude_code_user_agent = "claude-cli/2.1.88 (external, cli)"
 openclaw_user_agent = "OpenClaw-Gateway/1.0"
 
 [api]
@@ -465,9 +480,9 @@ remove_version_path = false
 mock_models = false
 # 模拟 /models 响应内容 (JSON 字符串)
 mock_models_resp = '{"object":"list","data":[{"id":"gpt-4","object":"model","owned_by":"organization"}]}'
-# Anthropic 格式兼容模式 (默认: false)
-# 将 Anthropic /v1/messages 转为 OpenAI Chat Completions，并修复 JSON Schema null 值
-# 适用于 Claude 风格客户端连接 OpenAI 兼容上游
+# Anthropic/Claude 客户端兼容模式 (默认: false)
+# 本地 Anthropic /v1/messages -> 上游 OpenAI 兼容 /chat/completions
+# 同时把上游 OpenAI JSON/SSE 响应转回 Anthropic 格式
 # 内置服务商会将 claude-* 模型名映射到其推荐编码模型
 use_anthropic = false
 
@@ -516,11 +531,26 @@ sudo systemctl start coding-plan-mask
 
 隐私过滤是低 CPU 的本地规则基线，不是完整 DLP 或机器学习 PII 检测器。项目专属敏感规则请通过 `[security.rules]` 扩展。
 
+### 🔁 协议兼容
+
+`disguise_tool` 和 `use_anthropic` 是两件事：
+
+- `disguise_tool` 只改转发到上游时的请求头/User-Agent，让上游看到受支持的编码客户端。
+- `use_anthropic` 才是本地协议转换开关。
+
+| 本地客户端请求 | 本地地址/路径 | 转发到上游 | 状态 |
+|----------------|---------------|------------|------|
+| OpenAI Chat Completions | `http://127.0.0.1:8787/v1/chat/completions` | OpenAI 兼容路径/请求体 | 默认支持 |
+| Anthropic Messages / Claude 风格 | `http://127.0.0.1:8787/v1/messages`，并设置 `use_anthropic=true` | OpenAI 兼容 `/chat/completions` | 已支持 |
+| OpenAI 客户端 → 原生 Anthropic/Claude 上游 | OpenAI `/v1/chat/completions` | Anthropic `/v1/messages` | 暂未实现 |
+
+也就是说：Claude/Anthropic 协议的本地客户端可以接入 OpenAI 兼容上游；请求、工具调用、工具结果、普通响应和 SSE 流都会在 `/v1/messages` 这条路径上转换。反向的“OpenAI 本地协议转原生 Claude/Anthropic 上游”目前没有做；如果上游本身提供 OpenAI 兼容接口，直接走默认 OpenAI 路径即可。
+
 ### 🎭 工具伪装选项
 
 | 工具 | 标识符 | User-Agent | 说明 |
 |------|--------|------------|------|
-| **Claude Code** | `claudecode` | `claude-cli/2.1.76 (external, cli)` | 当前默认 Claude CLI 风格 UA，可通过 `claude_code_user_agent` 覆盖 |
+| **Claude Code** | `claudecode` | `claude-cli/2.1.88 (external, cli)` | 当前默认 Claude CLI 风格 UA，可通过 `claude_code_user_agent` 覆盖 |
 | **Kimi Code** | `kimicode` | `claude-code/0.1.0` | Kimi Code API 订阅认证格式 |
 | **OpenCode** | `opencode` | `opencode/1.2.27 ai-sdk/provider-utils/3.0.20 runtime/bun/1.3.10` | 保留旧 disguise id，默认 UA 已按本地抓包报告更新 |
 | **OpenClaw** | `openclaw` | `OpenClaw-Gateway/1.0` | 兼容默认值，可通过 `openclaw_user_agent` 覆盖 |

@@ -185,6 +185,8 @@ Privacy switch:
 - `enabled = false` (default): proxy only; request bodies are not changed by the privacy filter.
 - `enabled = true`: redact or block locally before forwarding upstream. Configure `[auth].local_api_key` when this is enabled.
 
+Privacy design source: this feature borrows EdgeClaw-Mini's ideas of S1/S2/S3 sensitivity levels, local redact/block policy, full/clean audit tracks, and local context selection. Coding Plan Mask does not depend on or embed EdgeClaw-Mini; it implements a lightweight Go rules baseline inside the local proxy.
+
 #### 4. Start
 
 ```bash
@@ -522,6 +524,8 @@ chinese_id = true
 
 - `enabled = false`（默认）：只做代理和伪装，隐私过滤不会改写请求体。
 - `enabled = true`：转发上游前先在本地脱敏或阻断。开启后请配置 `[auth].local_api_key`。
+
+隐私保护设计借鉴来源：本功能借鉴 EdgeClaw-Mini 的 S1/S2/S3 敏感度分级、本地脱敏/阻断策略、full/clean 双轨审计和本地上下文筛选思路。Coding Plan Mask 不依赖也不内嵌 EdgeClaw-Mini，只是在本地代理内实现轻量 Go 规则基线。
 
 #### 4. 启动
 

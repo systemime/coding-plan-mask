@@ -34,9 +34,7 @@ Provider rules, available models, and subscription details can change over time.
 
 ### 💡 The Solution: Coding Plan Mask
 
-**Coding Plan Mask** acts as a bridge between your Coding Plan API and any OpenAI-compatible tool. It **masks** your requests to appear as if they come from officially supported IDE tools.
-
-Scope is intentionally small: local proxy, request-origin disguise, OpenAI/Anthropic compatibility, and optional local privacy protection. It is not a GUI app, cloud sync service, MCP/Skills panel, or multi-tenant billing platform.
+**Coding Plan Mask** is a lightweight local proxy for developers who want to use Coding Plan APIs from their preferred AI coding tools. It **masks** request origins as officially supported IDE clients, forwards OpenAI/Anthropic-compatible traffic, and can optionally apply local privacy filtering before prompts leave your machine.
 
 ```
 ┌────────────────────┐     ┌──────────────────────┐     ┌─────────────────────┐
@@ -388,9 +386,7 @@ This project is provided for **educational and research purposes only**.
 
 ### 💡 解决方案：Coding Plan Mask
 
-**Coding Plan Mask** 作为你的 Coding Plan API 和任意 OpenAI 兼容工具之间的桥梁。它将你的请求**伪装**成来自官方支持的 IDE 工具。
-
-项目边界很明确：本地代理、请求来源伪装、OpenAI/Anthropic 协议兼容，以及可选的本地隐私保护。它不是 GUI、云同步、MCP/Skills 面板，也不是多租户计费平台。
+**Coding Plan Mask** 是面向开发者的轻量本地代理，用来把 Coding Plan API 接入你常用的 AI 编码工具。它会将请求来源**伪装**成官方支持的 IDE 客户端，转发 OpenAI/Anthropic 兼容请求，并可在提示词离开本机前执行可选的本地隐私过滤。
 
 ### ✨ 核心功能
 
